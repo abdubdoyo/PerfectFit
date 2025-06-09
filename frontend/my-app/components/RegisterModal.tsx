@@ -2,6 +2,7 @@ import { Center, FormControl, Modal, VStack, Input, Button} from 'native-base'
 import React, { useState } from 'react'
 import { Alert } from 'react-native';
 import { router } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface RegisterModalProps { 
     isOpen: boolean; 
@@ -45,7 +46,9 @@ export default function RegisterModal({isOpen, onClose}: RegisterModalProps) {
 
             if(!response.ok){
                 throw new Error(data.message || 'Registration failed');
-            }     
+            }   
+            
+            await AsyncStorage.setItem('userToken', data.token);  
             Alert.alert("Success", data.message);         
             onClose();   
             router.replace('/LandingPage');                                                                                  

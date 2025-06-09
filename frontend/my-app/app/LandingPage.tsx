@@ -1,6 +1,18 @@
 import { Text, View, StyleSheet, TouchableOpacity, ScrollView} from "react-native";
+import { useEffect } from "react";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router } from "expo-router";
 
 export default function LandingPage() {
+  useEffect(() => {
+    const checkAuth = async () => {
+      const token = await AsyncStorage.getItem('userToken');
+      if(!token){
+        router.replace('/');
+      }
+    };
+    checkAuth();
+  }, [])
   // This will then be the store names and availability for the clothes like sizes, price and location from the user
   const stores = [
     {title: 'Clothing store 1', body: "Body text bla bla bla", image: "PIC1"},

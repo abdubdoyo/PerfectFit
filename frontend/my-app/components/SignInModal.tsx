@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import {Center, FormControl, Input, Modal, VStack, Button} from 'native-base'; 
 import { Alert } from 'react-native';
 import {router} from "expo-router";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // You use interface/type for the structure of the functionalities of your modal
 interface SignInModalProps { 
@@ -42,7 +43,9 @@ export default function SignInModal({isOpen, onClose}: SignInModalProps) {
                 throw new Error(data.message || "Login failed");
             }
 
+            await AsyncStorage.setItem('userToken', data.token);
             Alert.alert("Login successful");
+            
             router.push("/LandingPage"); // Navigate to home page after successful login
         }catch (error) {
             Alert.alert("Error");
