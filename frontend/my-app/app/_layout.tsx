@@ -1,7 +1,6 @@
 import { Stack, Slot} from "expo-router";
 import { View } from "react-native";
 import Navbar from "../components/Navbar";
-import LandingPage from "./LandingPage";
 import { NativeBaseProvider } from "native-base";
 
 export default function layout() {
@@ -10,7 +9,7 @@ export default function layout() {
       <View style={{ flex: 1 }}>
         <Navbar/>
         <View style={{ flex: 1 }}>
-          <Stack screenOptions={{headerShown: false}}></Stack>
+          <Slot screenOptions={{headerShown: false}}></Slot>
         </View>
       </View>
     </NativeBaseProvider>

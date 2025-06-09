@@ -1,6 +1,7 @@
 import { Center, FormControl, Modal, VStack, Input, Button} from 'native-base'
 import React, { useState } from 'react'
 import { Alert } from 'react-native';
+import { router } from 'expo-router';
 
 interface RegisterModalProps { 
     isOpen: boolean; 
@@ -12,23 +13,49 @@ export default function RegisterModal({isOpen, onClose}: RegisterModalProps) {
     const [confirmEmail, setConfirmEmail] = useState(" "); 
     const [password, setPassword] = useState(" "); 
     const [confirmPassword, setConfirmPassword] = useState(" "); 
+    const [isLoading, setIsLoading] = useState(false);
 
-    const handleSubmit = () => { 
+    const handleSubmit = async () => { 
         if (!email || !confirmEmail || !password || !confirmPassword) { 
-            Alert.alert("Fill all fields"); 
+            Alert.alert("Error", "Fill all fields"); 
             return; 
         }
         if (email !== confirmEmail) { 
-            Alert.alert("Email does not match"); 
+            Alert.alert("Error", "Email does not match"); 
             return; 
         }
         if (password !== confirmPassword) { 
-            Alert.alert("Password does not match"); 
+            Alert.alert("Error", "Password does not match"); 
             return; 
         }
-        Alert.alert("Success"); 
-        onClose(); 
-    }
+        setIsLoading(true);
+
+        try{
+            const response = await fetch('http://localhost:3000/api/register', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    email: email.trim(),
+                    password: password.trim(),
+                }),
+            });  
+            const data = await response.json();
+
+            if(!response.ok){
+                throw new Error(data.message || 'Registration failed');
+            }     
+            Alert.alert("Success", data.message);         
+            onClose();   
+            router.replace('/LandingPage');                                                                                  
+        }catch (error) {
+            Alert.alert("Error");
+            console.error("Registration error:", error);
+        }finally{
+            setIsLoading(false);
+        }
+    };
 
     return ( 
         <Center>
@@ -42,11 +69,20 @@ export default function RegisterModal({isOpen, onClose}: RegisterModalProps) {
                         <VStack space={4}>
                             <FormControl>
                                 <FormControl.Label>Email</FormControl.Label>
-                                <Input placeholder="" keyboardType="email-address" autoCapitalize='none' value={email} onChangeText={setEmail}></Input>
+                                <Input 
+                                placeholder=""
+                                keyboardType="email-address"
+                                autoCapitalize='none' 
+                                value={email} 
+                                onChangeText={setEmail}></Input>
                             </FormControl>
                             <FormControl>
                                 <FormControl.Label>Confrim Email</FormControl.Label>
-                                <Input placeholder="" keyboardType="email-address" autoCapitalize="none" value={confirmEmail} onChangeText={setConfirmEmail}></Input>
+                                <Input placeholder="" 
+                                keyboardType="email-address" 
+                                autoCapitalize="none" 
+                                value={confirmEmail} 
+                                onChangeText={setConfirmEmail}></Input>
                             </FormControl>
                             <FormControl>
                                 <FormControl.Label>Password</FormControl.Label>
@@ -63,7 +99,7 @@ export default function RegisterModal({isOpen, onClose}: RegisterModalProps) {
                             <Button variant="ghost" onPress={onClose}>
                                 Cancel
                             </Button>
-                            <Button onPress={handleSubmit}>
+                            <Button onPress={handleSubmit} isLoading={isLoading}>
                                 Submit
                             </Button>
                         </Button.Group>

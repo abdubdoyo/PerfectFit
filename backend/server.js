@@ -12,15 +12,18 @@ const mongoURI = process.env.MONGODB_URL;
 app.use(cors()); 
 app.use(express.json()); 
 
-mongoose.connect(mongoURI)
-.then(() => console.log('Connected to MongoDB Atlas'))
-.catch(err => { 
-    console.log('MongoDB Atlas connection error: ', err.message)
-}); 
+const authRoutes = require('./routes/auth');
+app.use('/api', authRoutes);
 
 app.get('/', (req, res) => { 
     res.send("Backend server is running and MongoDB"); 
 })
+
+mongoose.connect(mongoURI)
+    .then(() => console.log('Connected to MongoDB Atlas'))
+    .catch(err => { 
+        console.log('MongoDB Atlas connection error: ', err.message)
+    }); 
 
 app.listen(PORT, () => {
     console.log("Server is running on port 3000"); 

@@ -1,12 +1,11 @@
 const User = require('../models/user'); 
-const bcrypt = require('bycrypt'); 
+const bcrypt = require('bcrypt'); 
 const express = require('express'); 
 const jwt = require('jsonwebtoken'); 
-
-const app = express(); 
+const router = express.Router();
 
 // As soon as the user presses the register button, first route 
-app.post('/api/register', async (req, res) => { 
+router.post('/register', async (req, res) => { 
     try { 
         const { email, password } = req.body; 
         // Check if this user already exists
@@ -27,7 +26,7 @@ app.post('/api/register', async (req, res) => {
 }); 
 
 // 2nd Route
-app.post('/api/login', async (req, res) => { 
+router.post('/login', async (req, res) => { 
     try { 
         const {email, password} = req.body; 
         const user = await User.findOne({email}); 
@@ -43,4 +42,6 @@ app.post('/api/login', async (req, res) => {
     catch (error) { 
         res.send(500).json({message: "Server error"}); 
     }
-})
+});
+
+module.exports = router;
