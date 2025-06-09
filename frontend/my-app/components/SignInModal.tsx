@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import {Center, FormControl, Input, Modal, VStack, Button} from 'native-base'; 
 import { Alert } from 'react-native';
+import {router} from "expo-router";
 
 // You use interface/type for the structure of the functionalities of your modal
 interface SignInModalProps { 
@@ -13,7 +14,7 @@ export default function SignInModal({isOpen, onClose}: SignInModalProps) {
     const [password, setPassword] = useState(" "); 
     const [confirmPassword, setConfirmPassword] = useState(" "); 
 
-    const handleSubmit = () => { 
+    const handleSubmit = async () => { 
         if (!email || !password || !confirmPassword) { 
             Alert.alert("Error, all fields are required"); 
             return; 
@@ -24,7 +25,29 @@ export default function SignInModal({isOpen, onClose}: SignInModalProps) {
         }
         Alert.alert("Account Created"); 
         onClose(); 
-    }
+
+        try{
+            const response = await fetch("http://localhost:3000/api/login", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                }, 
+                body: JSON.stringify({
+                    email: email,
+                    password: password,
+                })
+            });
+            const data = await response.json();
+            if(!response.ok) {
+                throw new Error(data.message || "Login failed");
+            }
+
+            Alert.alert("Login successful");
+            router.push("/LandingPage"); // Navigate to home page after successful login
+        }catch (error) {
+            Alert.alert("Error");
+        };
+    };  
 
     return (
         <Center>
@@ -61,4 +84,4 @@ export default function SignInModal({isOpen, onClose}: SignInModalProps) {
             </Modal>
         </Center>
     ); 
-}; 
+} 
