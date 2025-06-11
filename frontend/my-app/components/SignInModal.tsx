@@ -1,6 +1,6 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect} from 'react'
 import {Center, FormControl, Input, Modal, VStack, Button} from 'native-base'; 
-import { Alert } from 'react-native';
+import { Alert, Platform} from 'react-native';
 import {router} from "expo-router";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -11,45 +11,88 @@ interface SignInModalProps {
 }
 
 export default function SignInModal({isOpen, onClose}: SignInModalProps) {
-    const [email, setEmail] = useState(" "); 
-    const [password, setPassword] = useState(" "); 
-    const [confirmPassword, setConfirmPassword] = useState(" "); 
+    const [email, setEmail] = useState(""); 
+    const [password, setPassword] = useState(""); 
+    const [confirmPassword, setConfirmPassword] = useState(""); 
+
+    useEffect(() => { 
+        setEmail(""); 
+        setPassword("")
+        setConfirmPassword(""); 
+    }, [isOpen])
 
     const handleSubmit = async () => { 
-        if (!email || !password || !confirmPassword) { 
-            Alert.alert("Error, all fields are required"); 
-            return; 
-        }
-        if (password !== confirmPassword) { 
-            Alert.alert("Password does not match"); 
-            return; 
-        }
-        Alert.alert("Account Created"); 
-        onClose(); 
-
-        try{
-            const response = await fetch("http://localhost:3000/api/login", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                }, 
-                body: JSON.stringify({
-                    email: email,
-                    password: password,
-                })
-            });
-            const data = await response.json();
-            if(!response.ok) {
-                throw new Error(data.message || "Login failed");
+        if (Platform.OS === "web") { 
+            if (!email || !password || !confirmPassword) { 
+                window.alert("Error, all fields are required"); 
+                return; 
             }
+            if (password !== confirmPassword) { 
+                window.alert("Password does not match"); 
+                return; 
+            }
+            try{
+                const response = await fetch("http://localhost:3000/api/login", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    }, 
+                    body: JSON.stringify({
+                        email: email.trim(),
+                        password: password.trim(),
+                    })
+                });
+                const data = await response.json();
+                if(!response.ok) {
+                    throw new Error(data.message || "Login failed");
+                }
+    
+                await AsyncStorage.setItem('userToken', data.token);
+                window.alert("Login successful");
+                onClose(); 
+                router.push("/LandingPage"); // Navigate to home page after successful login
+            }
+            catch (error) {
+                window.alert("Error");
+            };
+        }
 
-            await AsyncStorage.setItem('userToken', data.token);
-            Alert.alert("Login successful");
-            
-            router.push("/LandingPage"); // Navigate to home page after successful login
-        }catch (error) {
-            Alert.alert("Error");
-        };
+        if (Platform.OS === "ios") { 
+            if (!email || !password || !confirmPassword) { 
+                Alert.alert("Error, all fields are required"); 
+                return; 
+            }
+            if (password !== confirmPassword) { 
+                Alert.alert("Password does not match"); 
+                return; 
+            }
+            Alert.alert("Account Created"); 
+            onClose(); 
+    
+            try{
+                const response = await fetch("http://localhost:3000/api/login", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    }, 
+                    body: JSON.stringify({
+                        email: email,
+                        password: password,
+                    })
+                });
+                const data = await response.json();
+                if(!response.ok) {
+                    throw new Error(data.message || "Login failed");
+                }
+    
+                await AsyncStorage.setItem('userToken', data.token);
+                Alert.alert("Login successful");
+                
+                router.push("/LandingPage"); // Navigate to home page after successful login
+            }catch (error) {
+                Alert.alert("Error");
+            };
+        }
     };  
 
     return (

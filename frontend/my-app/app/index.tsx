@@ -1,11 +1,26 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Box, Button, Center, Heading, Text, VStack, HStack, Image, Icon, ScrollView, Divider, Link, Pressable } from 'native-base';
 import { MaterialIcons, FontAwesome, Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import SignInModal from '@/components/SignInModal';
 // import { useNavigation } from '@react-navigation/native';
 
 // const navigation = useNavigation();
 
 export default function Index() {
+  const [showLogin, setShowLogin] = useState(false); 
+
+  const handleMeasurePress = async () => { 
+    const token = await AsyncStorage.getItem('userToken')
+    if (token) { 
+      router.push('/LandingPage'); 
+    }
+    else { 
+      setShowLogin(true); 
+      <SignInModal isOpen={showLogin} onClose={() => setShowLogin(false)}></SignInModal>
+    }
+  }
   return (
     <ScrollView bg="white">
       {/* Hero Section */}
@@ -21,7 +36,7 @@ export default function Index() {
             size="lg" 
             colorScheme="primary" 
             endIcon={<Icon as={MaterialIcons} name="arrow-forward" />}
-            
+            onPress={handleMeasurePress}
           >
             Measure My Size Now
           </Button>

@@ -13,6 +13,7 @@ export default function LandingPage() {
     };
     checkAuth();
   }, [])
+  
   // This will then be the store names and availability for the clothes like sizes, price and location from the user
   const stores = [
     {title: 'Clothing store 1', body: "Body text bla bla bla", image: "PIC1"},
