@@ -1,9 +1,12 @@
-import { Text, View, StyleSheet, TouchableOpacity, ScrollView} from "react-native";
+import {Text, View, StyleSheet, TouchableOpacity, ScrollView, Platform} from "react-native";
 import { useEffect } from "react";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from "expo-router";
+import * as ImagePicker from 'expo-image-picker'; 
+import {MediaTypeOptions} from 'expo-image-picker'; 
 
 export default function LandingPage() {
+  // This u
   useEffect(() => {
     const checkAuth = async () => {
       const token = await AsyncStorage.getItem('userToken');
@@ -14,6 +17,38 @@ export default function LandingPage() {
     checkAuth();
   }, [])
   
+
+  const handlePressMe = async () => { 
+    if (Platform.OS === 'web') { 
+      let result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: MediaTypeOptions.Images, 
+        allowsEditing: true, 
+        quality: 1, 
+      }); 
+
+      if (!result.canceled) { 
+        alert('Image selected: ' + result.assets[0].uri); 
+      }
+
+    }
+    else { 
+      const {status} = await ImagePicker.requestCameraPermissionsAsync(); 
+      if (status !== 'granted') { 
+        alert('Sorry, we need camera permissions to make this work'); 
+        return; 
+      }
+      let result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true, 
+        quality: 1, 
+      })
+
+      if (!result.canceled) { 
+        alert('Image captured: ' + result.assets[0].uri); 
+      }
+    }
+  }
+
+
   // This will then be the store names and availability for the clothes like sizes, price and location from the user
   const stores = [
     {title: 'Clothing store 1', body: "Body text bla bla bla", image: "PIC1"},
@@ -28,7 +63,7 @@ export default function LandingPage() {
           <View style={styles.centerContent}>
             <Text style={styles.title}>Open The Camera and Take a Flick</Text>
             <TouchableOpacity style={styles.button}>
-              <Text style={styles.buttonText}>PRESS ME</Text>
+              <Text style={styles.buttonText} onPress={handlePressMe}>PRESS ME</Text>
             </TouchableOpacity>
           </View>
         </View>

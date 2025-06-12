@@ -53,11 +53,13 @@ export default function RegisterModal({isOpen, onClose}: RegisterModalProps) {
                 const data = await response.json();
     
                 if(!response.ok){
-                    throw new Error(data.message || 'Registration failed');
+                    window.alert('User already exists'); 
+                    console.log(data.message); 
                 }   
-                 
-                window.alert("Success");         
-                onClose();                                                                                    
+                else { 
+                    window.alert("Success");         
+                }  
+                onClose();                                                                                  
             }
             catch (error) {
                 window.alert("Error");

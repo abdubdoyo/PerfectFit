@@ -14,6 +14,7 @@ export default function SignInModal({isOpen, onClose}: SignInModalProps) {
     const [email, setEmail] = useState(""); 
     const [password, setPassword] = useState(""); 
     const [confirmPassword, setConfirmPassword] = useState(""); 
+    const [isModalOpen, setIsModalOpen] = useState(false); 
 
     useEffect(() => { 
         setEmail(""); 
@@ -44,9 +45,8 @@ export default function SignInModal({isOpen, onClose}: SignInModalProps) {
                 });
                 const data = await response.json();
                 if(!response.ok) {
-                    throw new Error(data.message || "Login failed");
+                    window.alert('Login Failed')
                 }
-    
                 await AsyncStorage.setItem('userToken', data.token);
                 window.alert("Login successful");
                 onClose(); 
