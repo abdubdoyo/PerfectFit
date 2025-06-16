@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from "expo-router";
 import * as ImagePicker from 'expo-image-picker'; 
 import {MediaTypeOptions} from 'expo-image-picker'; 
+import * as FileSystem from 'expo-file-system';
 
 export default function LandingPage() {
   // This u
@@ -44,7 +45,27 @@ export default function LandingPage() {
 
       if (!result.canceled) { 
         alert('Image captured: ' + result.assets[0].uri); 
+        const imageUri = result.assets[0].uri;
+        const fileInfo = await FileSystem.getInfoAsync(imageUri);
+
+        const formData = new FormData();
+        formData.append('photo', {
+          uri: fileInfo.uri,
+          type: 'image/jpeg',
+          name: 'tshirt.jpg',
+        } as any);
+      const response = await fetch('http://localhost:3000/api/analyze-image',{
+        method: 'POST',
+        body: formData,
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      const resultData = await response.json();
+      console.log(resultData);
       }
+      
     }
   }
 
