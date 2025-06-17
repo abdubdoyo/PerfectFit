@@ -1,5 +1,5 @@
 import {Text, View, StyleSheet, TouchableOpacity, ScrollView, Platform} from "react-native";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from "expo-router";
 import * as ImagePicker from 'expo-image-picker'; 
@@ -7,6 +7,7 @@ import {MediaTypeOptions} from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 
 export default function LandingPage() {
+  const [shirtResult, setShirtResult] = useState<string | null>(null);
   // This u
   useEffect(() => {
     const checkAuth = async () => {
@@ -57,13 +58,19 @@ export default function LandingPage() {
       const response = await fetch('http://localhost:3000/api/analyze-image',{
         method: 'POST',
         body: formData,
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+        
       });
+
+      if(!response.ok){
+        const errorData = await response.json();
+        console.error('Error:', errorData.message );
+        alert("Error: " + errorData.message);
+        return;
+      }
 
       const resultData = await response.json();
       console.log(resultData);
+      setShirtResult(resultData.message);
       }
       
     }
@@ -86,6 +93,11 @@ export default function LandingPage() {
             <TouchableOpacity style={styles.button}>
               <Text style={styles.buttonText} onPress={handlePressMe}>PRESS ME</Text>
             </TouchableOpacity>
+            {shirtResult && (
+              <Text style={{ fontSize: 18, fontWeight: '600', marginTop: 10, textAlign: 'center' }}>
+                {shirtResult}
+                </Text>
+            )}
           </View>
         </View>
 
@@ -117,11 +129,11 @@ const styles = StyleSheet.create({
   }, 
   centerContent: { 
     borderWidth: 2, 
-    borderColor: "#0DEEE8", 
+    borderColor: "#7EC8E3", 
     borderRadius: 3, 
     alignItems: "center", 
     justifyContent: "center", 
-    backgroundColor: "#11d5cf", 
+    backgroundColor: "#7EC8E3", 
   }, 
   title: { 
     fontSize: 38, 
@@ -131,7 +143,7 @@ const styles = StyleSheet.create({
     paddingTop: 20, 
   }, 
   button: { 
-    backgroundColor: "#098C88", 
+    backgroundColor: "#60A3D9", 
     borderRadius: 5, 
     paddingVertical: 10, 
     paddingHorizontal: 10, 

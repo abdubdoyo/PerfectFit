@@ -81,9 +81,12 @@ export default function Navbar() {
                             <Text style={styles.signIn}>Log In</Text>
                         </TouchableOpacity>
                     )}
-                    <TouchableOpacity style={styles.registerButton} onPress={() => setRegisterModal(true)}>
-                        <Text style={styles.registerText}>Register</Text>
-                    </TouchableOpacity>
+                    {!logIn && (
+                        <TouchableOpacity style={styles.registerButton} onPress={() => setRegisterModal(true)}>
+                            <Text style={styles.registerText}>Register</Text>
+                        </TouchableOpacity>
+                    )}
+                    
                 </View>
             </View>
             <SignInModal isOpen={isModalOpen} onClose={() => setModalOpen(false)}></SignInModal>
