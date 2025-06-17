@@ -1,7 +1,9 @@
 //import necessary modules
 const express = require('express');
+// Multer handles file uploads from HTTP request 
 const multer = require('multer');
 const path = require('path');
+// Fs is for getting the file system and then deleting the file system after image processing 
 const fs = require('fs');
 const vision = require('@google-cloud/vision');
 
@@ -64,11 +66,11 @@ router.post('/api/analyze-image', upload.single('photo'), async(req, res) => {
     }
 });
 
-module.exports = router;
-
 function mapToSize(widthCm) {
     if(widthCm >= 58) return 'XL';
     if(widthCm >= 54) return 'L';
     if(widthCm >= 50) return 'M';
     return 'S';
 }
+
+module.exports = router;

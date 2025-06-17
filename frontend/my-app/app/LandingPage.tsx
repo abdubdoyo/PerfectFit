@@ -1,14 +1,16 @@
-import {Text, View, StyleSheet, TouchableOpacity, ScrollView, Platform} from "react-native";
+import {Text, View, StyleSheet, TouchableOpacity, ScrollView, Platform, Alert, Modal} from "react-native";
 import { useEffect, useState } from "react";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from "expo-router";
 import * as ImagePicker from 'expo-image-picker'; 
-import {MediaTypeOptions} from 'expo-image-picker'; 
 import * as FileSystem from 'expo-file-system';
+import { MediaTypeOptions } from 'expo-image-picker';
 
 export default function LandingPage() {
   const [shirtResult, setShirtResult] = useState<string | null>(null);
-  // This u
+  const [modalVisible, setModalVisible] = useState(false); 
+
+
   useEffect(() => {
     const checkAuth = async () => {
       const token = await AsyncStorage.getItem('userToken');
@@ -19,62 +21,89 @@ export default function LandingPage() {
     checkAuth();
   }, [])
   
-
-  const handlePressMe = async () => { 
-    if (Platform.OS === 'web') { 
-      let result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: MediaTypeOptions.Images, 
-        allowsEditing: true, 
-        quality: 1, 
-      }); 
-
-      if (!result.canceled) { 
-        alert('Image selected: ' + result.assets[0].uri); 
+  // Here we are handling with iOS app camera request
+  const handleImagePick = async (fromCamera: boolean) => { 
+    try { 
+      setModalVisible(false); 
+      let result; 
+  
+      if (fromCamera) { 
+        const {status} = await ImagePicker.requestCameraPermissionsAsync(); 
+        if (status !== 'granted') { 
+          alert("Sorry, we need permissions to make this work"); 
+          return; 
+        }
+  
+        result = await ImagePicker.launchCameraAsync({
+          allowsEditing: true, 
+          quality: 1, 
+          mediaTypes: MediaTypeOptions.Images, 
+        }); 
       }
-
+      else { 
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync(); 
+        if (status !== "granted") { 
+          alert("Media library permission is required to select a photo"); 
+          return; 
+        }
+        result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: MediaTypeOptions.Images, 
+          quality: 1, 
+          allowsEditing: true, 
+        })
+      }
+  
+      if (!result.canceled && result.assets && result.assets.length > 0) { 
+        await handleImageUpload(result.assets[0].uri); 
+      }
     }
-    else { 
-      const {status} = await ImagePicker.requestCameraPermissionsAsync(); 
-      if (status !== 'granted') { 
-        alert('Sorry, we need camera permissions to make this work'); 
-        return; 
-      }
-      let result = await ImagePicker.launchCameraAsync({
-        allowsEditing: true, 
-        quality: 1, 
-      })
-
-      if (!result.canceled) { 
-        alert('Image captured: ' + result.assets[0].uri); 
-        const imageUri = result.assets[0].uri;
-        const fileInfo = await FileSystem.getInfoAsync(imageUri);
-
-        const formData = new FormData();
-        formData.append('photo', {
-          uri: fileInfo.uri,
-          type: 'image/jpeg',
-          name: 'tshirt.jpg',
-        } as any);
-      const response = await fetch('http://localhost:3000/api/analyze-image',{
-        method: 'POST',
-        body: formData,
-        
-      });
-
-      if(!response.ok){
-        const errorData = await response.json();
-        console.error('Error:', errorData.message );
-        alert("Error: " + errorData.message);
-        return;
-      }
-
-      const resultData = await response.json();
-      console.log(resultData);
-      setShirtResult(resultData.message);
-      }
-      
+    catch (error) { 
+      console.error("Image picking failed: ", error); 
+      alert("An unexpected error occured, please try again later"); 
     }
   }
+
+  const handleImageUpload = async (imageUri: string) => { 
+    try { 
+      const fileInfo = await FileSystem.getInfoAsync(imageUri); 
+      if (!fileInfo.exists) { 
+        alert("File does not exist at: " + imageUri); 
+        return; 
+      }
+
+      const formData = new FormData(); 
+      formData.append('photo', {
+        uri: imageUri, 
+        type: 'image/jpeg', 
+        name: 't-shirt.jpg', 
+      } as any); 
+
+      const response = await fetch('http://localhost:3000/api/analyze-image', { 
+        method: 'POST', 
+        headers: { 
+          'Content-Type': 'multipart/form-data', 
+        }, 
+        body: formData,
+      })
+
+      if (!response.ok) { 
+        const errorData = await response.json(); 
+        console.error("Server Error: ", errorData); 
+        alert("Upload failed: " + errorData.message); 
+        return; 
+      }
+
+      const resultData = await response.json(); 
+      console.log('Sucess: ', resultData); 
+      setShirtResult(resultData.message); 
+
+    }
+    catch (error) { 
+      console.error("Upload failed: ", error); 
+      alert("An error occured while uploading the image. Please try again later"); 
+    }
+  }
+
 
 
   // This will then be the store names and availability for the clothes like sizes, price and location from the user
@@ -91,7 +120,7 @@ export default function LandingPage() {
           <View style={styles.centerContent}>
             <Text style={styles.title}>Open The Camera and Take a Flick</Text>
             <TouchableOpacity style={styles.button}>
-              <Text style={styles.buttonText} onPress={handlePressMe}>PRESS ME</Text>
+              <Text style={styles.buttonText} onPress={() => setModalVisible(true)}>PRESS ME</Text>
             </TouchableOpacity>
             {shirtResult && (
               <Text style={{ fontSize: 18, fontWeight: '600', marginTop: 10, textAlign: 'center' }}>
@@ -100,6 +129,26 @@ export default function LandingPage() {
             )}
           </View>
         </View>
+
+        <Modal transparent visible={modalVisible} animationType="fade" onRequestClose={() => setModalVisible(false)}>
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>
+                  Choose an Option
+                </Text>
+                <TouchableOpacity style={styles.modalButton} onPress={() => handleImagePick(true)}>
+                  <Text style={styles.modalButtonText}>📷 Take Photo</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.modalButton} onPress={() => handleImagePick(false)}>
+                  <Text style={styles.modalButtonText}>🖼️ Choose from Gallery</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.modalButton, {backgroundColor: '#ccc'}]} onPress={() => setModalVisible(false)}>
+                  <Text style={styles.modalButtonText}>❌ Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+        </Modal>
+
 
         <View style={styles.storesSection}> 
           <Text style={styles.storesTitle}>Perfect fitting t-shirts can be found below</Text>
@@ -192,4 +241,35 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 44, 
   }, 
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  modalContent: {
+    width: '80%',
+    padding: 20,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 20,
+  },
+  modalButton: {
+    backgroundColor: '#007bff',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    marginVertical: 5,
+    width: '100%',
+  },
+  modalButtonText: {
+    color: '#fff',
+    textAlign: 'center',
+    fontSize: 16,
+  },
 })
