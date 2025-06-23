@@ -1,15 +1,24 @@
-import {Text, View, StyleSheet, TouchableOpacity, ScrollView, Platform, Alert, Modal} from "react-native";
-import { useEffect, useState } from "react";
+import {Text, View, StyleSheet, TouchableOpacity, ScrollView, Platform, Alert, Modal, Image} from "react-native";
+import {useEffect, useState } from "react";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from "expo-router";
 import * as ImagePicker from 'expo-image-picker'; 
-import * as FileSystem from 'expo-file-system';
-import { MediaTypeOptions } from 'expo-image-picker';
 
 export default function LandingPage() {
   const [shirtResult, setShirtResult] = useState<string | null>(null);
   const [modalVisible, setModalVisible] = useState(false); 
+  const [selectionModalVisible, setSelectionModalVisible] = useState(false); 
+  const [selectedImage, setSelectedImage] = useState<string | null>(null); 
+  const [selectedSize, setSelectedSize] = useState<string | null>(null); 
+  const [finalResult, setFinalResult] = useState(false); 
 
+  useEffect(() => { 
+    // Only when selectionModalVisible is false 
+    if (!selectionModalVisible && !finalResult) { 
+      setSelectedImage(null); 
+      setSelectedSize(null); 
+    }
+  }, [selectionModalVisible, finalResult])
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -20,99 +29,111 @@ export default function LandingPage() {
     };
     checkAuth();
   }, [])
-  
-  // Here we are handling with iOS app camera request
-  const handleImagePick = async (fromCamera: boolean) => { 
-    try { 
-      setModalVisible(false); 
-      let result; 
-  
-      if (fromCamera) { 
-        const {status} = await ImagePicker.requestCameraPermissionsAsync(); 
-        if (status !== 'granted') { 
-          alert("Sorry, we need permissions to make this work"); 
-          return; 
+
+  // handleImagePick allows us to handle image selection in React Native application 
+  const handleImagePick = async (fromCamera: boolean) => {
+    try {
+      setModalVisible(false);
+      if (Platform.OS === 'web') { 
+        if (fromCamera) { 
+          alert('📷 On web, "Take Photo" will open a file picker. Please upload a clear, chest-level, centered image.'); 
         }
-  
-        result = await ImagePicker.launchCameraAsync({
-          allowsEditing: true, 
-          quality: 1, 
-          mediaTypes: MediaTypeOptions.Images, 
-        }); 
+        else { 
+          alert('🖼️ Make sure your uploaded image is well-lit, centered, and shows the full upper body.'); 
+        }
       }
-      else { 
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync(); 
-        if (status !== "granted") { 
-          alert("Media library permission is required to select a photo"); 
-          return; 
+
+      if (Platform.OS !== 'web') { 
+        if (fromCamera) { 
+          const {status} = await ImagePicker.requestCameraPermissionsAsync(); 
+          if (status !== 'granted') { 
+            Alert.alert('Permission required'); 
+            return; 
+          }
         }
-        result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: MediaTypeOptions.Images, 
-          quality: 1, 
+        else { 
+          const {status} = await ImagePicker.requestMediaLibraryPermissionsAsync(); 
+          if (status !== 'granted') { 
+            Alert.alert('Permission required'); 
+            return; 
+          }
+        }
+      }
+
+      const result = await (fromCamera
+        ? ImagePicker.launchCameraAsync({
           allowsEditing: true, 
+          aspect: [3, 4], 
+          quality: 1, 
+          base64: Platform.OS === 'web', 
         })
-      }
-  
-      if (!result.canceled && result.assets && result.assets.length > 0) { 
-        await handleImageUpload(result.assets[0].uri); 
+        : ImagePicker.launchImageLibraryAsync({
+          allowsEditing: true, 
+          aspect: [3,4], 
+          quality: 1, 
+          base64: Platform.OS === 'web', 
+        })
+      )
+
+      if (!result.canceled && result.assets?.[0]?.uri) { 
+        setSelectedImage(result.assets[0].uri); 
+        setSelectionModalVisible(true); 
       }
     }
     catch (error) { 
-      console.error("Image picking failed: ", error); 
-      alert("An unexpected error occured, please try again later"); 
+      console.error('Image picker error:', error); 
+      alert('Something went wrong while selecting the image'); 
     }
-  }
+  };
 
-  const handleImageUpload = async (imageUri: string) => { 
-    try { 
-      const fileInfo = await FileSystem.getInfoAsync(imageUri); 
-      if (!fileInfo.exists) { 
-        alert("File does not exist at: " + imageUri); 
-        return; 
-      }
 
+  const handleSizeConfirm = async () => {
+    if (!selectedImage || !selectedSize) { 
+      alert('Please select both an image and size'); 
+      return; 
+    }
+
+    try {
       const formData = new FormData(); 
-      formData.append('photo', {
-        uri: imageUri, 
-        type: 'image/jpeg', 
-        name: 't-shirt.jpg', 
-      } as any); 
 
-      const response = await fetch('http://localhost:3000/api/analyze-image', { 
-        method: 'POST', 
-        headers: { 
-          'Content-Type': 'multipart/form-data', 
-        }, 
-        body: formData,
-      })
+      if (Platform.OS === 'web') { 
+        const response = await fetch(selectedImage); 
+        const blob = await response.blob(); 
+        formData.append('photo', blob, 'photo.jpg'); 
+      } else { 
+        const fileName = selectedImage.split('/').pop() || 'photo.jpg'; 
+        const match = /\.(\w+)$/.exec(fileName);
+        const type = match ? `image/${match[1]}` : 'image/jpeg'; 
 
-      if (!response.ok) { 
-        const errorData = await response.json(); 
-        console.error("Server Error: ", errorData); 
-        alert("Upload failed: " + errorData.message); 
-        return; 
+        formData.append('photo', { 
+          uri: selectedImage, 
+          name: fileName, 
+          type, 
+        } as any); 
       }
+      formData.append('userSize', selectedSize); 
 
-      const resultData = await response.json(); 
-      console.log('Sucess: ', resultData); 
-      setShirtResult(resultData.message); 
+      const response = await fetch('http://localhost:3000/api/estimate-shirt-size', { 
+        method: 'POST', 
+        body: formData, 
+      }); 
 
+      const data = await response.json(); 
+      if (!response.ok) { 
+        window.alert(data.error || 'Something went wrong'); 
+        return; 
+      } 
+
+      setShirtResult(data.message); 
+      setSelectionModalVisible(false); 
+      setFinalResult(true); 
     }
     catch (error) { 
-      console.error("Upload failed: ", error); 
-      alert("An error occured while uploading the image. Please try again later"); 
+      console.error('Upload error', error); 
+      alert('Upload failed. Please try again.'); 
     }
-  }
+  };
 
-
-
-  // This will then be the store names and availability for the clothes like sizes, price and location from the user
-  const stores = [
-    {title: 'Clothing store 1', body: "Body text bla bla bla", image: "PIC1"},
-    {title: 'Clothing store 2', body: "Body text 2 bla bla bla", image: "PIC2"},
-    {title: 'Clothing store 3', body: "Body text 3 bla bla bla", image: "PIC3"},
-    {title: 'Clothing store 4', body: "Body text 4 bla bla bla", image: "PIC4"},
-  ]; 
 
   return (
     <ScrollView style={{flex: 1, backgroundColor: "#f2f2f2"}}>
@@ -122,50 +143,139 @@ export default function LandingPage() {
             <TouchableOpacity style={styles.button}>
               <Text style={styles.buttonText} onPress={() => setModalVisible(true)}>PRESS ME</Text>
             </TouchableOpacity>
-            {shirtResult && (
-              <Text style={{ fontSize: 18, fontWeight: '600', marginTop: 10, textAlign: 'center' }}>
-                {shirtResult}
-                </Text>
-            )}
           </View>
         </View>
 
-        <Modal transparent visible={modalVisible} animationType="fade" onRequestClose={() => setModalVisible(false)}>
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContent}>
-                <Text style={styles.modalTitle}>
-                  Choose an Option
-                </Text>
-                <TouchableOpacity style={styles.modalButton} onPress={() => handleImagePick(true)}>
-                  <Text style={styles.modalButtonText}>📷 Take Photo</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.modalButton} onPress={() => handleImagePick(false)}>
-                  <Text style={styles.modalButtonText}>🖼️ Choose from Gallery</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.modalButton, {backgroundColor: '#ccc'}]} onPress={() => setModalVisible(false)}>
-                  <Text style={styles.modalButtonText}>❌ Cancel</Text>
-                </TouchableOpacity>
+        {finalResult && selectedImage && (
+          <View style={{padding: 20}}>
+            <Text style={{fontSize: 20, fontWeight: 'bold', textAlign: 'center', marginBottom: 10}}>Attire Predictor Result</Text>
+            <View style={{flexDirection: 'row', justifyContent: 'space-between'}}>
+              {/* Left column first */}
+              <View style={{flex: 1, paddingRight: 10}}>
+                <Text style={{fontWeight: '600', marginBottom: 5}}>Attire Predictor Suggests:</Text>
+                <Text>Size: {shirtResult}</Text>
+                <Text>Location: </Text>
+                <Text>Stock Availability: </Text>
+                <Text>Colors Available: </Text>
+                <Text>Price: </Text>
+
+                <Image source={{uri: selectedImage}} style={{width: '100%', aspectRatio: 3/4, marginTop: 10, borderRadius: 10}} resizeMode="cover"></Image>
+              </View>
+
+              {/* Right column */}
+              <View style={{flex: 1, paddingLeft: 10}}>
+                <Text style={{fontWeight: '600', marginBottom: 5}}>User's Photo</Text>
+                <Text>User's Size: {selectedSize}</Text>
+
+                <Image source={{uri: selectedImage}} style={{width: '100%', aspectRatio: 3/4, marginTop: 50, borderRadius: 10}}></Image>
               </View>
             </View>
-        </Modal>
-
-
-        <View style={styles.storesSection}> 
-          <Text style={styles.storesTitle}>Perfect fitting t-shirts can be found below</Text>
-          <Text style={styles.storesSubheading}>Based on your picture</Text>
-          <View style={styles.storesGrid}>
-            {stores.map((store, i) => (
-              <View style={styles.storesCard} key={i}>
-                <Text style={styles.storesIcon}>ⓘ</Text>
-                <View>
-                  <Text style={styles.storesTitle}>{store.title}</Text>
-                  <Text style={styles.storesBody}>{store.body}</Text>
-                  <Text style={styles.storesImage}>{store.image}</Text>
-                </View>
-              </View>
-            ))} 
           </View>
+        )}
+
+        <Modal 
+          transparent 
+          visible={modalVisible} 
+          animationType="fade" 
+          onRequestClose={() => setModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+          <View style={styles.selectionModalContent}>
+            <Text style={styles.modalTitle}>
+              Choose an Option
+            </Text>
+      
+          <TouchableOpacity 
+            style={styles.imageOptionButton} 
+            onPress={() => {if (Platform.OS === 'web') {handleImagePick(true)} else {router.push('/CameraScreen')}}}
+           >
+          <Text style={styles.imageOptionText}>📷 Take Photo</Text>
+          </TouchableOpacity>
+      
+          <TouchableOpacity 
+            style={styles.imageOptionButton} 
+            onPress={() => {
+            if (Platform.OS === 'web') {
+              alert("📸 Make sure the photo is centered and your upper body is clearly visible.");
+              setTimeout(() => handleImagePick(false), 100); 
+            } else { 
+              handleImagePick(false); 
+            }
+            }}
+            >
+              <Text style={styles.imageOptionText}>🖼️ Choose from Gallery</Text>
+          </TouchableOpacity>
+      
+          <TouchableOpacity 
+          style={[styles.imageOptionButton, styles.cancelButton]} 
+          onPress={() => setModalVisible(false)}
+          >
+          <Text style={styles.imageOptionText}>Cancel</Text>
+          </TouchableOpacity>
+          </View>
+          </View>
+      </Modal>
+
+      <Modal 
+        transparent 
+        visible={selectionModalVisible} 
+        animationType="slide" 
+        onRequestClose={() => setSelectionModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+        <View style={styles.confirmationModalContent}>
+        <Text style={styles.modalTitle}>Confirm Your Size</Text>
+      
+        <View style={styles.imageSizeContainer}>
+          {/* Left side - Big image */}
+          <View style={styles.imagePreviewContainer}>
+            {selectedImage && (
+              <Image 
+                source={{uri: selectedImage}} 
+                style={styles.largePreviewImage}
+                resizeMode="contain"
+              />
+            )}
+          </View>
+        
+          {/* Right side - Size selection */}
+          <View style={styles.sizeSelectionContainer}>
+            <Text style={styles.sizeTitle}>Select your size:</Text>
+            {['XS', 'S', 'M', 'L', 'XL'].map((size) => (
+              <TouchableOpacity
+                key={size}
+                style={[
+                styles.sizeButton,
+                selectedSize === size && styles.sizeButtonSelected
+              ]}
+              onPress={() => setSelectedSize(size)}
+            >
+              <Text style={styles.sizeButtonText}>{size}</Text>
+            </TouchableOpacity>
+          ))}
+          </View>
+          </View>
+
+        {/* Action buttons */}
+        <View style={styles.modalActions}>
+          <TouchableOpacity 
+          style={[styles.actionButton, styles.secondaryButton]}
+          onPress={() => setSelectionModalVisible(false)}
+          >
+            <Text style={styles.actionButtonText}>Back</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+          style={[styles.actionButton, styles.primaryButton]}
+          onPress={handleSizeConfirm}
+          disabled={!selectedSize}
+        >
+          <Text style={styles.actionButtonText}>Confirm</Text>
+        </TouchableOpacity>
         </View>
+        </View>
+        </View>
+      </Modal>
+
     </ScrollView>
   );
 }
@@ -247,29 +357,106 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.5)',
   },
-  modalContent: {
-    width: '80%',
-    padding: 20,
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    alignItems: 'center',
-  },
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     marginBottom: 20,
-  },
-  modalButton: {
-    backgroundColor: '#007bff',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    marginVertical: 5,
-    width: '100%',
-  },
-  modalButtonText: {
-    color: '#fff',
     textAlign: 'center',
+    color: '#222',
+  },
+  
+  // Image Selection Modal specific
+  selectionModalContent: {
+    width: '80%',
+    maxWidth: 350,
+    backgroundColor: 'white',
+    borderRadius: 15,
+    padding: 25,
+  },
+  imageOptionButton: {
+    padding: 15,
+    borderRadius: 10,
+    backgroundColor: '#11f8f1',
+    marginBottom: 12,
+  },
+  imageOptionText: {
     fontSize: 16,
+    textAlign: 'center',
+  },
+  cancelButton: {
+    backgroundColor: '#e0e0e0',
+    marginTop: 10,
+  },
+  
+  // Size Confirmation Modal specific
+  confirmationModalContent: {
+    width: '90%',
+    maxWidth: 600,
+    backgroundColor: 'white',
+    borderRadius: 15,
+    padding: 20,
+  },
+  imageSizeContainer: {
+    flexDirection: 'row',
+    marginBottom: 20,
+  },
+  imagePreviewContainer: {
+    flex: 0.7,
+    paddingRight: 15,
+  },
+  largePreviewImage: {
+    width: '100%',
+    height: undefined,
+    aspectRatio: 3/4,
+    borderRadius: 15,
+    borderWidth: 5,
+    borderColor: '#f0f0f0',
+  },
+  sizeSelectionContainer: {
+    flex: 0.3,
+  },
+  sizeTitle: {
+    marginBottom: 15,
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  sizeButton: {
+    paddingVertical: 12,
+    marginBottom: 8,
+    borderRadius: 8,
+    backgroundColor: 'grey',
+    alignItems: 'center',
+  },
+  sizeButtonSelected: {
+    backgroundColor: 'blue',
+  },
+  sizeButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  sizeButtonSelectedText: {
+    color: 'white',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  actionButton: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  primaryButton: {
+    backgroundColor: '#000',
+  },
+  secondaryButton: {
+    backgroundColor: '#ccc',
+    marginRight: 10,
+  },
+  actionButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
   },
 })
