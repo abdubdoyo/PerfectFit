@@ -12,9 +12,12 @@ const mongoURI = process.env.MONGODB_URL;
 // Middlewares
 app.use(cors()); 
 app.use(express.json()); 
-
 app.use('/api', authRoutes); 
 app.use('/', imageRoutes); 
+
+app.get('/', (req, res) => { 
+    res.send('API is running'); 
+}); 
 
 mongoose.connect(mongoURI)
     .then(() => console.log('Connected to MongoDB Atlas'))
