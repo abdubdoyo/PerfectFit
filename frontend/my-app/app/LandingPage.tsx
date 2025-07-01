@@ -3,6 +3,18 @@ import {useEffect, useState } from "react";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from "expo-router";
 import * as ImagePicker from 'expo-image-picker'; 
+import * as Location from 'expo-location'; 
+
+// When the whole code renders, first thing first is to get the location of the user 
+async function getCoords() { 
+  const {status} = await Location.requestForegroundPermissionsAsync(); 
+  if (status !== 'granted') throw new Error('Location permission denied'); 
+
+  const {coords} = await Location.getCurrentPositionAsync({}); 
+
+  // Getting the latitude and the longitude of the user 
+  return {lat: coords.latitude, lng: coords.longitude}; 
+}
 
 export default function LandingPage() {
   const [shirtResult, setShirtResult] = useState<string | null>(null);
@@ -11,6 +23,7 @@ export default function LandingPage() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null); 
   const [selectedSize, setSelectedSize] = useState<string | null>(null); 
   const [finalResult, setFinalResult] = useState(false); 
+  const [storeResults, setStoreResults] = useState<any[]>([]); 
 
   useEffect(() => { 
     // Only when selectionModalVisible is false 
@@ -134,6 +147,29 @@ export default function LandingPage() {
     }
   };
 
+  const handleFindStores = async () => { 
+    try { 
+      const {lat, lng} = await getCoords(); 
+      const body = {
+        size: shirtResult?.replace('Estimated shirt size: ', ''), 
+        lat, 
+        lng, 
+      }; 
+
+      const res = await fetch('http://localhost:3000/api/recommendations', { 
+        method: 'POST', 
+        headers: {'Content-type': 'application/json'}, 
+        body: JSON.stringify(body), 
+      }); 
+
+      if (!res.ok) throw new Error('Failed to get store data'); 
+      const stores = await res.json(); 
+      setStoreResults(stores); 
+    }
+    catch (error) { 
+      Alert.alert('Could not fetch any store recommendations'); 
+    }
+  }
 
   return (
     <ScrollView style={{flex: 1, backgroundColor: "#f2f2f2"}}>
