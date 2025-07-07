@@ -144,4 +144,3 @@ router.post('/api/estimate-shirt-size', upload.single('photo'), async (req, res)
 });
 
 module.exports = router;
- 

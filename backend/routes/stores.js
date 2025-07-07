@@ -1,32 +1,84 @@
-const express = require('express'); 
-const axios = require('axios'); 
-const router = express.Router(); 
+const express = require('express');
+const axios = require('axios');
+const router = express.Router();
+require('dotenv').config(); 
 
-router.post('/api/recommendations', async (req, res)=> { 
-    try { 
-        const {size, lat, lng} = await req.body; 
+const GOOGLE_KEY = process.env.GOOGLE_PLACE_KEY;
 
-        if (!size || !lat || !lng) { 
-            return res.status(400).json({error: 'Missing size or coordinates'}); 
+if (!GOOGLE_KEY) {
+  console.error("FATAL: Google Places API key not configured!");
+  process.exit(1);
+}
+
+console.log("Using Google API Key:", GOOGLE_KEY ? "***REDACTED***" : "MISSING");
+
+// Add detailed error logging
+router.post('/api/recommendations', async (req, res) => {
+    console.log('Received request with body:', req.body);
+    
+    try {
+        const { size, lat, lng } = req.body; // Removed await since req.body doesn't need it
+
+        if (!size || !lat || !lng) {
+            console.error('Missing parameters:', { size, lat, lng });
+            return res.status(400).json({ error: 'Missing size or coordinates' });
         }
 
-        const stores = await findNearbyStores(lat, lng); 
-        const enriched = await Promise.all(
-            stores.map(async (s) => ({ 
-                ...s, 
-                stock: await checkStoreStock(s, size)
-            }))
-        ); 
+        console.log(`Searching stores near ${lat},${lng} for size ${size}`);
+        const stores = await findNearbyStores(lat, lng);
 
-        const ranked = enriched.sort((a, b) => { 
-            if (a.stock.inStock !== b.stock.inStock) return a.stock.inStock ? -1 : 1;
-            return a.distanceMeters - b.distanceMeters;
-        }); 
+        if (!stores || stores.length === 0) {
+            console.log('No stores found');
+            return res.status(404).json({ error: 'No clothing stores found nearby' });
+        }
 
-        res.json(ranked.slice(0, 10)); 
+        const ranked = stores.sort((a, b) => a.distanceMeters - b.distanceMeters);
+        const results = ranked.slice(0, 10);
+        
+        console.log(`Returning ${results.length} stores`);
+        res.json(results);
     }
-    catch (err) { 
-        console.error(err); 
-        res.status(500).json({error: 'Failed to match error recommendations'}); 
+    catch (err) {
+        console.error('Full error:', err);
+        if (err.response) {
+            console.error('Google API response error:', err.response.data);
+        }
+        res.status(500).json({ 
+            error: 'Failed to get store recommendations',
+            details: err.message 
+        });
     }
-}); 
+});
+
+async function findNearbyStores(lat, lng) {
+    const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=5000&type=clothing_store&key=${GOOGLE_KEY}`;
+    
+    console.log('Making Google Places API request to:', url);
+    const { data } = await axios.get(url);
+    
+    if (data.status !== 'OK') {
+        throw new Error(`Google Places API error: ${data.status}`);
+    }
+
+    return data.results.map(r => ({
+        placeId: r.place_id,
+        name: r.name,
+        address: r.vicinity,
+        rating: r.rating,
+        distanceMeters: haversine(
+            lat, lng,
+            r.geometry.location.lat,
+            r.geometry.location.lng
+        ),
+        // Convert meters to miles for frontend
+        distance: (haversine(
+            lat, lng,
+            r.geometry.location.lat,
+            r.geometry.location.lng
+        ) * 0.000621371).toFixed(1) // meters to miles
+    }));
+}
+
+// ... keep your existing haversine function ...
+
+module.exports = router;

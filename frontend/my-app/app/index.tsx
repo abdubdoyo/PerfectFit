@@ -40,9 +40,6 @@ export default function Index() {
           >
             Measure My Size Now
           </Button>
-          <Pressable>
-            <Text underline color="primary.600">How It Works</Text>
-          </Pressable>
         </VStack>
       </Box>
 

@@ -1,498 +1,599 @@
-import {Text, View, StyleSheet, TouchableOpacity, ScrollView, Platform, Alert, Modal, Image} from "react-native";
-import {useEffect, useState } from "react";
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { useEffect, useState } from "react";
+import {
+  View,
+  Text,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Pressable,
+  Modal,
+  Platform,
+  Dimensions,
+  ActivityIndicator,
+  Alert,
+} from "react-native";
+import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
+import { LinearGradient } from "expo-linear-gradient";
+import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
-import * as ImagePicker from 'expo-image-picker'; 
-import * as Location from 'expo-location'; 
 
-// When the whole code renders, first thing first is to get the location of the user 
-async function getCoords() { 
-  const {status} = await Location.requestForegroundPermissionsAsync(); 
-  if (status !== 'granted') throw new Error('Location permission denied'); 
+// ────────────────────────────────────────────────────────────────
+// 1. DESIGN TOKENS  ──────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────
+export const colors = {
+  primary: "#11d5cf",
+  primaryDark: "#0fbdbc",
+  greyBg: "#f2f2f2",
+  text: "#222",
+  card: "#fff",
+};
 
-  const {coords} = await Location.getCurrentPositionAsync({}); 
+export const radii = {
+  card: 16,
+  button: 8,
+};
 
-  // Getting the latitude and the longitude of the user 
-  return {lat: coords.latitude, lng: coords.longitude}; 
+export const shadow = {
+  elevation: 3, // Android
+  shadowColor: "#000", // iOS
+  shadowOpacity: 0.1,
+  shadowRadius: 6,
+  shadowOffset: { width: 0, height: 3 },
+};
+
+// ────────────────────────────────────────────────────────────────
+// 2. REUSABLE BUTTONS  ───────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────
+interface BtnProps {
+  label: string;
+  disabled?: boolean;
+  onPress: () => void;
+  style?: object;
 }
 
+function PrimaryButton({ label, disabled, onPress, style }: BtnProps) {
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.btnBase,
+        {
+          backgroundColor: disabled ? "#aaa" : colors.primaryDark,
+          opacity: pressed ? 0.8 : 1,
+        },
+        style,
+      ]}
+      disabled={disabled}
+      onPress={onPress}
+    >
+      <Text style={styles.btnLabel}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function SecondaryButton({ label, onPress, style }: BtnProps) {
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.btnSecondary,
+        pressed && { opacity: 0.8 },
+        style,
+      ]}
+      onPress={onPress}
+    >
+      <Text style={[styles.btnLabel, { color: colors.primaryDark }]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────
+// 3. HERO CARD  ─────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────
+function HeroCard({ onTakePhoto, onUploadPhoto, disabled }: {
+  onTakePhoto: () => void;
+  onUploadPhoto: () => void;
+  disabled: boolean;
+}) {
+  return (
+    <LinearGradient
+      colors={[colors.primary, colors.primaryDark]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={[hero.card, shadow]}
+    >
+      <Ionicons name="camera-outline" size={64} color="#fff" />
+
+      <Text style={hero.headline}>Open the camera and take a flick</Text>
+
+      <PrimaryButton label="Take photo" disabled={disabled} onPress={onTakePhoto} style={{ marginTop: 8 }} />
+      <SecondaryButton label="Upload photo" onPress={onUploadPhoto} style={{ marginTop: 8 }} />
+    </LinearGradient>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────
+// 4. UTILS  ─────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────
+async function getCoords() {
+  const { status } = await Location.requestForegroundPermissionsAsync();
+  if (status !== "granted") throw new Error("Location permission denied");
+  const { coords } = await Location.getCurrentPositionAsync({});
+  return { lat: coords.latitude, lng: coords.longitude };
+}
+
+// ────────────────────────────────────────────────────────────────
+// 5. MAIN COMPONENT  ────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────
 export default function LandingPage() {
+  // photo + size flow
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedSize, setSelectedSize] = useState<string | null>(null);
   const [shirtResult, setShirtResult] = useState<string | null>(null);
-  const [modalVisible, setModalVisible] = useState(false); 
-  const [selectionModalVisible, setSelectionModalVisible] = useState(false); 
-  const [selectedImage, setSelectedImage] = useState<string | null>(null); 
-  const [selectedSize, setSelectedSize] = useState<string | null>(null); 
-  const [finalResult, setFinalResult] = useState(false); 
-  const [storeResults, setStoreResults] = useState<any[]>([]); 
+  const [storeResults, setStoreResults] = useState<any[]>([]);
 
-  useEffect(() => { 
-    // Only when selectionModalVisible is false 
-    if (!selectionModalVisible && !finalResult) { 
-      setSelectedImage(null); 
-      setSelectedSize(null); 
-    }
-  }, [selectionModalVisible, finalResult])
+  // modal visibility
+  const [pickModal, setPickModal] = useState(false);
+  const [sizeModal, setSizeModal] = useState(false);
+  const [resultModal, setResultModal] = useState(false);
 
+  // loading states
+  const [loadingSize, setLoadingSize] = useState(false);
+  const [loadingStores, setLoadingStores] = useState(false);
+
+  // location ready flag
+  const [locationReady, setLocationReady] = useState(false);
+
+  // auth check
   useEffect(() => {
-    const checkAuth = async () => {
-      const token = await AsyncStorage.getItem('userToken');
-      if(!token){
-        router.replace('/');
-      }
-    };
-    checkAuth();
-  }, [])
+    (async () => {
+      const token = await AsyncStorage.getItem("userToken");
+      if (!token) router.replace("/");
+    })();
+  }, []);
 
-  // handleImagePick allows us to handle image selection in React Native application 
+  // location permission pre‑check
+  useEffect(() => {
+    (async () => {
+      try {
+        const serviceEnabled = await Location.hasServicesEnabledAsync();
+        if (!serviceEnabled) {
+          Alert.alert(
+            "Turn On Location Services",
+            "Please enable GPS or Location Services in your phone settings so we can show nearby stores."
+          );
+          return;
+        }
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === "granted") setLocationReady(true);
+      } catch (e) {
+        console.warn("Location check error", e);
+      }
+    })();
+  }, []);
+
+  // handle pick photo — camera or gallery
   const handleImagePick = async (fromCamera: boolean) => {
     try {
-      setModalVisible(false);
-      if (Platform.OS === 'web') { 
-        if (fromCamera) { 
-          alert('📷 On web, "Take Photo" will open a file picker. Please upload a clear, chest-level, centered image.'); 
-        }
-        else { 
-          alert('🖼️ Make sure your uploaded image is well-lit, centered, and shows the full upper body.'); 
-        }
-      }
+      setPickModal(false);
 
-      if (Platform.OS !== 'web') { 
-        if (fromCamera) { 
-          const {status} = await ImagePicker.requestCameraPermissionsAsync(); 
-          if (status !== 'granted') { 
-            Alert.alert('Permission required'); 
-            return; 
+      // permissions on native
+      if (Platform.OS !== "web") {
+        if (fromCamera) {
+          const { status } = await ImagePicker.requestCameraPermissionsAsync();
+          if (status !== "granted") {
+            Alert.alert("Camera access denied");
+            return;
           }
-        }
-        else { 
-          const {status} = await ImagePicker.requestMediaLibraryPermissionsAsync(); 
-          if (status !== 'granted') { 
-            Alert.alert('Permission required'); 
-            return; 
+        } else {
+          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (status !== "granted") {
+            Alert.alert("Media library access denied");
+            return;
           }
         }
       }
 
       const result = await (fromCamera
         ? ImagePicker.launchCameraAsync({
-          allowsEditing: true, 
-          aspect: [3, 4], 
-          quality: 1, 
-          base64: Platform.OS === 'web', 
-        })
+            allowsEditing: true,
+            aspect: [3, 4],
+            quality: 1,
+            base64: Platform.OS === "web",
+          })
         : ImagePicker.launchImageLibraryAsync({
-          allowsEditing: true, 
-          aspect: [3,4], 
-          quality: 1, 
-          base64: Platform.OS === 'web', 
-        })
-      )
+            allowsEditing: true,
+            aspect: [3, 4],
+            quality: 1,
+            base64: Platform.OS === "web",
+          }));
 
-      if (!result.canceled && result.assets?.[0]?.uri) { 
-        setSelectedImage(result.assets[0].uri); 
-        setSelectionModalVisible(true); 
+      if (!result.canceled && result.assets?.[0]?.uri) {
+        setSelectedImage(result.assets[0].uri);
+        setSizeModal(true);
       }
-    }
-    catch (error) { 
-      console.error('Image picker error:', error); 
-      alert('Something went wrong while selecting the image'); 
+    } catch (e) {
+      console.error("Image pick error", e);
+      Alert.alert("Something went wrong while selecting the image");
     }
   };
 
-
+  // confirm size → call backend
   const handleSizeConfirm = async () => {
-    if (!selectedImage || !selectedSize) { 
-      alert('Please select both an image and size'); 
-      return; 
-    }
-
+    if (!selectedImage || !selectedSize) return;
     try {
-      const formData = new FormData(); 
+      setLoadingSize(true);
 
-      if (Platform.OS === 'web') { 
-        const response = await fetch(selectedImage); 
-        const blob = await response.blob(); 
-        formData.append('photo', blob, 'photo.jpg'); 
-      } else { 
-        const fileName = selectedImage.split('/').pop() || 'photo.jpg'; 
-        const match = /\.(\w+)$/.exec(fileName);
-        const type = match ? `image/${match[1]}` : 'image/jpeg'; 
-
-        formData.append('photo', { 
-          uri: selectedImage, 
-          name: fileName, 
-          type, 
-        } as any); 
+      const formData = new FormData();
+      if (Platform.OS === "web") {
+        const resp = await fetch(selectedImage);
+        const blob = await resp.blob();
+        formData.append("photo", blob, "photo.jpg");
+      } else {
+        const fileName = selectedImage.split("/").pop() || "photo.jpg";
+        const extMatch = /\.(\w+)$/.exec(fileName);
+        const type = extMatch ? `image/${extMatch[1]}` : "image/jpeg";
+        formData.append("photo", {
+          uri: selectedImage,
+          name: fileName,
+          type,
+        } as any);
       }
-      formData.append('userSize', selectedSize); 
+      formData.append("userSize", selectedSize);
 
-      const response = await fetch('http://localhost:3000/api/estimate-shirt-size', { 
-        method: 'POST', 
-        body: formData, 
-      }); 
+      const res = await fetch("http://localhost:3000/api/estimate-shirt-size", {
+        method: "POST",
+        body: formData,
+      });
 
-      const data = await response.json(); 
-      if (!response.ok) { 
-        window.alert(data.error || 'Something went wrong'); 
-        return; 
-      } 
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Something went wrong");
 
-      setShirtResult(data.message); 
-      setSelectionModalVisible(false); 
-      setFinalResult(true); 
-    }
-    catch (error) { 
-      console.error('Upload error', error); 
-      alert('Upload failed. Please try again.'); 
+      setShirtResult(data.message);
+      setSizeModal(false);
+      setResultModal(true);
+    } catch (e: any) {
+      Alert.alert(e.message || "Upload failed");
+    } finally {
+      setLoadingSize(false);
     }
   };
 
-  const handleFindStores = async () => { 
-    try { 
-      const {lat, lng} = await getCoords(); 
-      const body = {
-        size: shirtResult?.replace('Estimated shirt size: ', ''), 
-        lat, 
-        lng, 
-      }; 
-
-      const res = await fetch('http://localhost:3000/api/recommendations', { 
-        method: 'POST', 
-        headers: {'Content-type': 'application/json'}, 
-        body: JSON.stringify(body), 
-      }); 
-
-      if (!res.ok) throw new Error('Failed to get store data'); 
-      const stores = await res.json(); 
-      setStoreResults(stores); 
+  // fetch nearby stores
+  const handleFindStores = async () => {
+    if (!shirtResult) return;
+    try {
+      setLoadingStores(true);
+      const { lat, lng } = await getCoords();
+      const res = await fetch("http://localhost:3000/api/recommendations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          size: shirtResult.replace("Estimated shirt size: ", ""),
+          lat,
+          lng,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to fetch stores");
+      setStoreResults(data);
+    } catch (e: any) {
+      Alert.alert(e.message || "Could not fetch stores");
+    } finally {
+      setLoadingStores(false);
     }
-    catch (error) { 
-      Alert.alert('Could not fetch any store recommendations'); 
-    }
-  }
+  };
 
+  // ──────────────────────────────────────────────────────────────
+  // 6. RENDER  ──────────────────────────────────────────────────
+  // ──────────────────────────────────────────────────────────────
   return (
-    <ScrollView style={{flex: 1, backgroundColor: "#f2f2f2"}}>
-        <View style={styles.container}>
-          <View style={styles.centerContent}>
-            <Text style={styles.title}>Open The Camera and Take a Flick</Text>
-            <TouchableOpacity style={styles.button}>
-              <Text style={styles.buttonText} onPress={() => setModalVisible(true)}>PRESS ME</Text>
-            </TouchableOpacity>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: colors.greyBg }}
+      contentContainerStyle={{ alignItems: "center", paddingVertical: 32 }}
+    >
+      {/* HERO */}
+      <HeroCard
+        disabled={!locationReady}
+        onTakePhoto={() => setPickModal(true)}
+        onUploadPhoto={() => handleImagePick(false)}
+      />
+
+      {/* PICK OPTION MODAL */}
+      <Modal transparent visible={pickModal} animationType="fade">
+        <View style={modal.overlay}>
+          <View style={modal.pickCard}>
+            <Text style={modal.title}>Choose an option</Text>
+            <PrimaryButton
+              label="📷 Take photo"
+              onPress={() => handleImagePick(true)}
+            />
+            <SecondaryButton
+              label="🖼️ Choose from gallery"
+              onPress={() => handleImagePick(false)}
+              style={{ marginTop: 12 }}
+            />
+            <Pressable onPress={() => setPickModal(false)} style={{ marginTop: 20 }}>
+              <Text style={{ textAlign: "center", color: colors.text }}>Cancel</Text>
+            </Pressable>
           </View>
         </View>
+      </Modal>
 
-        {finalResult && selectedImage && (
-          <View style={{padding: 20}}>
-            <Text style={{fontSize: 20, fontWeight: 'bold', textAlign: 'center', marginBottom: 10}}>Attire Predictor Result</Text>
-            <View style={{flexDirection: 'row', justifyContent: 'space-between'}}>
-              {/* Left column first */}
-              <View style={{flex: 1, paddingRight: 10}}>
-                <Text style={{fontWeight: '600', marginBottom: 5}}>Attire Predictor Suggests:</Text>
-                <Text>Size: {shirtResult}</Text>
-                <Text>Location: </Text>
-                <Text>Stock Availability: </Text>
-                <Text>Colors Available: </Text>
-                <Text>Price: </Text>
+      {/* SIZE CONFIRMATION MODAL */}
+      <Modal transparent visible={sizeModal} animationType="slide">
+        <View style={modal.overlay}>
+          <View style={modal.sizeCard}>
+            <Text style={modal.title}>Confirm your size</Text>
+            <SizeChooser
+              imageUri={selectedImage}
+              selected={selectedSize}
+              onSelect={setSelectedSize}
+            />
 
-                
-              </View>
-
-              {/* Right column */}
-              <View style={{flex: 1, paddingLeft: 10}}>
-                <Text style={{fontWeight: '600', marginBottom: 5}}>User's Photo</Text>
-                <Text>User's Size: {selectedSize}</Text>
-
-                <Image source={{uri: selectedImage}} style={{width: '50%', aspectRatio: 3/4, marginTop: 50, borderRadius: 10}}></Image>
-              </View>
+            <View style={{ flexDirection: "row", marginTop: 16 }}>
+              <SecondaryButton label="Back" onPress={() => setSizeModal(false)} style={{ flex: 1, marginRight: 8 }} />
+              <PrimaryButton
+                label={loadingSize ? "Uploading…" : "Confirm"}
+                disabled={!selectedSize || loadingSize}
+                onPress={handleSizeConfirm}
+                style={{ flex: 1 }}
+              />
             </View>
           </View>
-        )}
-
-        <Modal 
-          transparent 
-          visible={modalVisible} 
-          animationType="fade" 
-          onRequestClose={() => setModalVisible(false)}
-        >
-          <View style={styles.modalOverlay}>
-          <View style={styles.selectionModalContent}>
-            <Text style={styles.modalTitle}>
-              Choose an Option
-            </Text>
-      
-          <TouchableOpacity 
-            style={styles.imageOptionButton} 
-            onPress={() => {if (Platform.OS === 'web') {handleImagePick(true)} else {router.push('/CameraScreen')}}}
-           >
-          <Text style={styles.imageOptionText}>📷 Take Photo</Text>
-          </TouchableOpacity>
-      
-          <TouchableOpacity 
-            style={styles.imageOptionButton} 
-            onPress={() => {
-            if (Platform.OS === 'web') {
-              alert("📸 Make sure the photo is centered and your upper body is clearly visible.");
-              setTimeout(() => handleImagePick(false), 100); 
-            } else { 
-              handleImagePick(false); 
-            }
-            }}
-            >
-              <Text style={styles.imageOptionText}>🖼️ Choose from Gallery</Text>
-          </TouchableOpacity>
-      
-          <TouchableOpacity 
-          style={[styles.imageOptionButton, styles.cancelButton]} 
-          onPress={() => setModalVisible(false)}
-          >
-          <Text style={styles.imageOptionText}>Cancel</Text>
-          </TouchableOpacity>
-          </View>
-          </View>
+        </View>
       </Modal>
 
-      <Modal 
-        transparent 
-        visible={selectionModalVisible} 
-        animationType="slide" 
-        onRequestClose={() => setSelectionModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-        <View style={styles.confirmationModalContent}>
-        <Text style={styles.modalTitle}>Confirm Your Size</Text>
-      
-        <View style={styles.imageSizeContainer}>
-          {/* Left side - Big image */}
-          <View style={styles.imagePreviewContainer}>
-            {selectedImage && (
-              <Image 
-                source={{uri: selectedImage}} 
-                style={styles.largePreviewImage}
-                resizeMode="contain"
-              />
+      {/* RESULT MODAL */}
+      <Modal transparent visible={resultModal} animationType="slide">
+        <View style={modal.overlay}>
+          <View style={modal.resultCard}>
+            <Text style={modal.title}>Your size results</Text>
+            {shirtResult && <Text style={modal.resultText}>{shirtResult}</Text>}
+            <PrimaryButton
+              label={loadingStores ? "Finding stores…" : "Find nearby stores"}
+              onPress={handleFindStores}
+              style={{ marginBottom: 16 }}
+              disabled={loadingStores}
+            />
+
+            {storeResults.length > 0 && (
+              <View style={{ width: "100%" }}>
+                <Text style={modal.subtitle}>Recommended stores</Text>
+                <ScrollView style={{ maxHeight: 250 }}>
+                  {storeResults.map((s, i) => (
+                    <StoreCard key={i} store={s} />
+                  ))}
+                </ScrollView>
+              </View>
             )}
-          </View>
-        
-          {/* Right side - Size selection */}
-          <View style={styles.sizeSelectionContainer}>
-            <Text style={styles.sizeTitle}>Select your size:</Text>
-            {['XS', 'S', 'M', 'L', 'XL'].map((size) => (
-              <TouchableOpacity
-                key={size}
-                style={[
-                styles.sizeButton,
-                selectedSize === size && styles.sizeButtonSelected
-              ]}
-              onPress={() => setSelectedSize(size)}
-            >
-              <Text style={styles.sizeButtonText}>{size}</Text>
-            </TouchableOpacity>
-          ))}
-          </View>
-          </View>
 
-        {/* Action buttons */}
-        <View style={styles.modalActions}>
-          <TouchableOpacity 
-          style={[styles.actionButton, styles.secondaryButton]}
-          onPress={() => setSelectionModalVisible(false)}
-          >
-            <Text style={styles.actionButtonText}>Back</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-          style={[styles.actionButton, styles.primaryButton]}
-          onPress={handleSizeConfirm}
-          disabled={!selectedSize}
-        >
-          <Text style={styles.actionButtonText}>Confirm</Text>
-        </TouchableOpacity>
-        </View>
-        </View>
+            <SecondaryButton label="Close" onPress={() => {
+              setResultModal(false);
+              setStoreResults([]);
+            }} />
+          </View>
         </View>
       </Modal>
-
     </ScrollView>
   );
 }
 
+// ────────────────────────────────────────────────────────────────
+// 7. Size Chooser Component  ────────────────────────────────────
+// ────────────────────────────────────────────────────────────────
+function SizeChooser({
+  imageUri,
+  selected,
+  onSelect,
+}: {
+  imageUri: string | null;
+  selected: string | null;
+  onSelect: (s: string) => void;
+}) {
+  const { width } = Dimensions.get("window");
+  const isSmall = width < 600;
 
+  return (
+    <View style={[size.container, { flexDirection: isSmall ? "column" : "row" }]}>
+      <View style={[size.imageWrap, isSmall && { marginBottom: 16 }]}>
+        {imageUri && (
+          <Image
+            source={{ uri: imageUri }}
+            style={size.image}
+            resizeMode="contain"
+          />
+        )}
+      </View>
+      <View style={size.pickerWrap}>
+        <Text style={size.subtitle}>Select your size</Text>
+        {['XS', 'S', 'M', 'L', 'XL'].map((sz) => (
+          <Pressable
+            key={sz}
+            style={[size.pickBtn, selected === sz && size.pickBtnActive]}
+            onPress={() => onSelect(sz)}
+          >
+            <Text style={[size.pickText, selected === sz && { color: "#fff" }]}>{sz}</Text>
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────
+// 8. Store Card Component  ──────────────────────────────────────
+// ────────────────────────────────────────────────────────────────
+function StoreCard({ store }: { store: any }) {
+  return (
+    <View style={storeStyles.card}>
+      <Text style={storeStyles.name}>{store.name}</Text>
+      <Text style={storeStyles.addr}>{store.address}</Text>
+      <View style={storeStyles.badge}>
+        <Text style={storeStyles.badgeText}>{store.distanceMeters} m</Text>
+      </View>
+    </View>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────
+// 9. STYLES  ────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: "#11d5cf", 
-  }, 
-  centerContent: { 
-    borderWidth: 2, 
-    borderColor: "#7EC8E3", 
-    borderRadius: 3, 
-    alignItems: "center", 
-    justifyContent: "center", 
-    backgroundColor: "#7EC8E3", 
-  }, 
-  title: { 
-    fontSize: 38, 
-    fontWeight: "bold", 
-    marginBottom: 10, 
-    textAlign: 'center', 
-    paddingTop: 20, 
-  }, 
-  button: { 
-    backgroundColor: "#60A3D9", 
-    borderRadius: 5, 
-    paddingVertical: 10, 
-    paddingHorizontal: 10, 
-    marginBottom: 20, 
-  }, 
-  buttonText: { 
-    fontSize: 30, 
-    fontWeight: '500',
-    color: "#222", 
-  }, 
-  storesSection: { 
-    marginTop: 24, 
-    marginHorizontal: 20, 
-  }, 
-  storesTitle: { 
-    fontSize: 16, 
-    fontWeight: 'bold', 
-    marginBottom: 4, 
-  }, 
-  storesSubheading: { 
-    fontSize: 15, 
-    color: "#555", 
-    marginBottom: 22, 
-  }, 
-  storesGrid: { 
-    flexDirection: "row", 
-    justifyContent: 'space-between', 
-    flexWrap: 'wrap', 
-  }, 
-  storesCard: { 
-    width: "45%", 
-    marginBottom: 24, 
-    flexDirection: "row", 
-    alignItems: 'flex-start', 
-    gap: 5, 
-  }, 
-  storesIcon: { 
-    fontSize: 15, 
-  }, 
-  storesBody: { 
-    fontSize: 13, 
-    color: "#555", 
-  }, 
-  storesImage: { 
-    textAlign: 'center', 
-    justifyContent: 'center',
-    marginTop: 44, 
-  }, 
-  modalOverlay: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.5)',
+  btnBase: {
+    width: "100%",
+    paddingVertical: 12,
+    borderRadius: radii.button,
+    alignItems: "center",
   },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 20,
-    textAlign: 'center',
-    color: '#222',
+  btnSecondary: {
+    width: "100%",
+    paddingVertical: 12,
+    borderWidth: 2,
+    borderColor: colors.primaryDark,
+    borderRadius: radii.button,
+    alignItems: "center",
   },
-  
-  // Image Selection Modal specific
-  selectionModalContent: {
-    width: '80%',
-    maxWidth: 350,
-    backgroundColor: 'white',
-    borderRadius: 15,
-    padding: 25,
-  },
-  imageOptionButton: {
-    padding: 15,
-    borderRadius: 10,
-    backgroundColor: '#11f8f1',
-    marginBottom: 12,
-  },
-  imageOptionText: {
+  btnLabel: {
     fontSize: 16,
-    textAlign: 'center',
+    fontWeight: "600",
+    color: "#fff",
   },
-  cancelButton: {
-    backgroundColor: '#e0e0e0',
-    marginTop: 10,
+});
+
+const hero = StyleSheet.create({
+  card: {
+    width: "90%",
+    maxWidth: 480,
+    borderRadius: radii.card,
+    padding: 24,
+    alignItems: "center",
   },
-  
-  // Size Confirmation Modal specific
-  confirmationModalContent: {
-    width: '35%',
-    maxWidth: 600,
-    backgroundColor: 'white',
-    borderRadius: 15,
-    padding: 20,
+  headline: {
+    color: "#fff",
+    fontSize: 22,
+    fontWeight: "700",
+    textAlign: "center",
+    marginVertical: 16,
   },
-  imageSizeContainer: {
-    flexDirection: 'row',
+});
+
+const modal = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: colors.text,
+    textAlign: "center",
     marginBottom: 20,
   },
-  imagePreviewContainer: {
+  pickCard: {
+    width: "80%",
+    maxWidth: 350,
+    backgroundColor: colors.card,
+    borderRadius: radii.card,
+    padding: 24,
+    ...shadow,
+  },
+  sizeCard: {
+    width: Dimensions.get("window").width < 600 ? "90%" : "35%",
+    maxWidth: 600,
+    backgroundColor: colors.card,
+    borderRadius: radii.card,
+    padding: 24,
+    ...shadow,
+  },
+  resultCard: {
+    width: "90%",
+    maxWidth: 400,
+    backgroundColor: colors.card,
+    borderRadius: radii.card,
+    padding: 24,
+    maxHeight: "85%",
+    ...shadow,
+  },
+  resultText: {
+    fontSize: 18,
+    fontWeight: "700",
+    textAlign: "center",
+    marginVertical: 16,
+    color: colors.text,
+  },
+  subtitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 8,
+    color: colors.text,
+  },
+});
+
+const size = StyleSheet.create({
+  container: {
+    width: "100%",
+    marginVertical: 8,
+  },
+  imageWrap: {
     flex: 0.7,
-    paddingRight: 15,
+    paddingRight: 12,
   },
-  largePreviewImage: {
-    width: '100%',
-    height: undefined,
-    aspectRatio: 3/4,
-    borderRadius: 15,
+  image: {
+    width: "100%",
+    aspectRatio: 3 / 4,
+    borderRadius: radii.card,
     borderWidth: 5,
-    borderColor: '#f0f0f0',
+    borderColor: "#f0f0f0",
   },
-  sizeSelectionContainer: {
+  pickerWrap: {
     flex: 0.3,
   },
-  sizeTitle: {
-    marginBottom: 15,
-    fontWeight: 'bold',
+  subtitle: {
     fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 12,
+    color: colors.text,
   },
-  sizeButton: {
+  pickBtn: {
     paddingVertical: 10,
-    marginBottom: 7,
-    borderRadius: 7,
-    backgroundColor: 'grey',
-    alignItems: 'center',
+    marginBottom: 8,
+    borderRadius: radii.button,
+    backgroundColor: "#ddd",
+    alignItems: "center",
   },
-  sizeButtonSelected: {
-    backgroundColor: 'blue',
+  pickBtnActive: {
+    backgroundColor: colors.primaryDark,
   },
-  sizeButtonText: {
+  pickText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
+    fontWeight: "600",
+    color: colors.text,
   },
-  sizeButtonSelectedText: {
-    color: 'white',
-  },
-  modalActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  actionButton: {
-    flex: 1,
+});
+
+const storeStyles = StyleSheet.create({
+  card: {
+    backgroundColor: colors.card,
+    borderRadius: radii.card,
     padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
+    marginBottom: 12,
+    ...shadow,
   },
-  primaryButton: {
-    backgroundColor: '#000',
+  name: { fontWeight: "700", fontSize: 16, color: colors.text },
+  addr: { color: "#555", marginTop: 2 },
+  badge: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    backgroundColor: colors.primary,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radii.button,
   },
-  secondaryButton: {
-    backgroundColor: '#ccc',
-    marginRight: 10,
-  },
-  actionButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
-})
+  badgeText: { color: "#fff", fontSize: 12 },
+});

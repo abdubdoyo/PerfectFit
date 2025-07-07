@@ -1,0 +1,608 @@
+import {Text, View, StyleSheet, TouchableOpacity, ScrollView, Platform, Alert, Modal, Image} from "react-native";
+import {useEffect, useState } from "react";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router } from "expo-router";
+import * as ImagePicker from 'expo-image-picker'; 
+import * as Location from 'expo-location'; 
+
+// When the whole code renders, first thing first is to get the location of the user 
+async function getCoords() { 
+  const {status} = await Location.requestForegroundPermissionsAsync(); 
+  if (status !== 'granted') throw new Error('Location permission denied'); 
+
+  const {coords} = await Location.getCurrentPositionAsync({}); 
+
+  // Getting the latitude and the longitude of the user 
+  return {lat: coords.latitude, lng: coords.longitude}; 
+}
+
+export default function LandingPage() {
+  const [shirtResult, setShirtResult] = useState<string | null>(null);
+  const [modalVisible, setModalVisible] = useState(false); 
+  const [selectionModalVisible, setSelectionModalVisible] = useState(false); 
+  const [selectedImage, setSelectedImage] = useState<string | null>(null); 
+  const [selectedSize, setSelectedSize] = useState<string | null>(null); 
+  const [finalResult, setFinalResult] = useState(false); 
+  const [storeResults, setStoreResults] = useState<any[]>([]); 
+  const [locationReady, setLocationReady] = useState(false); 
+
+  useEffect(() => { 
+    (async () => { 
+      try { 
+        // Are location services actually enabled on the device
+        const serviceEnabled = await Location.hasServicesEnabledAsync(); 
+        if (!serviceEnabled) { 
+          Alert.alert(
+            'Turn On Location Services', 
+            'Please enable GPS or Location Services in your phone settings. ' + 
+            'We need it to show nearby stores.', 
+          ); 
+          return; 
+        }
+
+        // Request foreground permission 
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert(
+            'Location Permission Needed',
+            'We use your location only to find stores near you. ' +
+            'Please grant permission to continue.',
+          );
+          return;
+        }
+
+        setLocationReady(true); 
+      } catch (err) { 
+        console.error('Location check failed', err); 
+        Alert.alert(
+          'Error Getting Location', 
+          'Something went wrong while checking your location. Please try again.', 
+        ); 
+      }
+    }) (); 
+  }, []); // Should only happen once 
+
+
+  useEffect(() => { 
+    // Only when selectionModalVisible is false 
+    if (!selectionModalVisible && !finalResult) { 
+      setSelectedImage(null); 
+      setSelectedSize(null); 
+    }
+  }, [selectionModalVisible, finalResult])
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      const token = await AsyncStorage.getItem('userToken');
+      if(!token){
+        router.replace('/');
+      }
+    };
+    checkAuth();
+  }, [])
+
+  // handleImagePick allows us to handle image selection in React Native application 
+  const handleImagePick = async (fromCamera: boolean) => {
+    try {
+      setModalVisible(false);
+      if (Platform.OS === 'web') { 
+        if (fromCamera) { 
+          alert('📷 On web, "Take Photo" will open a file picker. Please upload a clear, chest-level, centered image.'); 
+        }
+        else { 
+          alert('🖼️ Make sure your uploaded image is well-lit, centered, and shows the full upper body.'); 
+        }
+      }
+
+      if (Platform.OS !== 'web') { 
+        if (fromCamera) { 
+          const {status} = await ImagePicker.requestCameraPermissionsAsync(); 
+          if (status !== 'granted') { 
+            Alert.alert('Permission required'); 
+            return; 
+          }
+        }
+        else { 
+          const {status} = await ImagePicker.requestMediaLibraryPermissionsAsync(); 
+          if (status !== 'granted') { 
+            Alert.alert('Permission required'); 
+            return; 
+          }
+        }
+      }
+
+      const result = await (fromCamera
+        ? ImagePicker.launchCameraAsync({
+          allowsEditing: true, 
+          aspect: [3, 4], 
+          quality: 1, 
+          base64: Platform.OS === 'web', 
+        })
+        : ImagePicker.launchImageLibraryAsync({
+          allowsEditing: true, 
+          aspect: [3,4], 
+          quality: 1, 
+          base64: Platform.OS === 'web', 
+        })
+      )
+
+      if (!result.canceled && result.assets?.[0]?.uri) { 
+        setSelectedImage(result.assets[0].uri); 
+        setSelectionModalVisible(true); 
+      }
+    }
+    catch (error) { 
+      console.error('Image picker error:', error); 
+      alert('Something went wrong while selecting the image'); 
+    }
+  };
+
+
+  const handleSizeConfirm = async () => {
+    if (!selectedImage || !selectedSize) { 
+      alert('Please select both an image and size'); 
+      return; 
+    }
+
+    try {
+      const formData = new FormData(); 
+
+      if (Platform.OS === 'web') { 
+        const response = await fetch(selectedImage); 
+        const blob = await response.blob(); 
+        formData.append('photo', blob, 'photo.jpg'); 
+      } else { 
+        const fileName = selectedImage.split('/').pop() || 'photo.jpg'; 
+        const match = /\.(\w+)$/.exec(fileName);
+        const type = match ? `image/${match[1]}` : 'image/jpeg'; 
+
+        formData.append('photo', { 
+          uri: selectedImage, 
+          name: fileName, 
+          type, 
+        } as any); 
+      }
+      formData.append('userSize', selectedSize); 
+
+      const response = await fetch('http://localhost:3000/api/estimate-shirt-size', { 
+        method: 'POST', 
+        body: formData, 
+      }); 
+
+      const data = await response.json(); 
+      if (!response.ok) { 
+        window.alert(data.error || 'Something went wrong'); 
+        return; 
+      } 
+
+      setShirtResult(data.message); 
+      setSelectionModalVisible(false); 
+      setFinalResult(true); 
+    }
+    catch (error) { 
+      console.error('Upload error', error); 
+      alert('Upload failed. Please try again.'); 
+    }
+  };
+
+  const handleFindStores = async () => { 
+    try {
+        console.log('Finding stores...');
+        const {lat, lng} = await getCoords();
+        console.log('Using coordinates:', lat, lng);
+        
+        const body = {
+            size: shirtResult?.replace('Estimated shirt size: ', ''),
+            lat,
+            lng,
+        };
+        console.log('Sending request with:', body);
+
+        const res = await fetch('http://localhost:3000/api/recommendations', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+            const errorData = await res.json();
+            console.error('API Error:', errorData);
+            throw new Error(errorData.error || 'Failed to get store data');
+        }
+
+        const stores = await res.json();
+        console.log('Received stores:', stores);
+        setStoreResults(stores);
+    }
+    catch (error) {
+        console.error('Store fetch error:', error);
+        Alert.alert(
+            'Error',
+            'Could not fetch store recommendations'
+        );
+    }
+}
+
+  return (
+    <ScrollView style={{flex: 1, backgroundColor: "#f2f2f2"}}>
+        <View style={styles.container}>
+          <View style={styles.centerContent}>
+            <Text style={styles.title}>Open The Camera and Take a Flick</Text>
+            <TouchableOpacity style={[styles.button, !locationReady && {opacity: 0.5},]} disabled={!locationReady} onPress={() => setModalVisible(true)}>
+              <Text style={styles.buttonText}>PRESS ME</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <Modal 
+          transparent 
+          visible={modalVisible} 
+          animationType="fade" 
+          onRequestClose={() => setModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+          <View style={styles.selectionModalContent}>
+            <Text style={styles.modalTitle}>
+              Choose an Option
+            </Text>
+      
+          <TouchableOpacity 
+            style={styles.imageOptionButton} 
+            onPress={() => {if (Platform.OS === 'web') {handleImagePick(true)} else {router.push('/CameraScreen')}}}
+           >
+          <Text style={styles.imageOptionText}>📷 Take Photo</Text>
+          </TouchableOpacity>
+      
+          <TouchableOpacity 
+            style={styles.imageOptionButton} 
+            onPress={() => {
+            if (Platform.OS === 'web') {
+              alert("📸 Make sure the photo is centered and your upper body is clearly visible.");
+              setTimeout(() => handleImagePick(false), 100); 
+            } else { 
+              handleImagePick(false); 
+            }
+            }}
+            >
+              <Text style={styles.imageOptionText}>🖼️ Choose from Gallery</Text>
+          </TouchableOpacity>
+      
+          <TouchableOpacity 
+          style={[styles.imageOptionButton, styles.cancelButton]} 
+          onPress={() => setModalVisible(false)}
+          >
+          <Text style={styles.imageOptionText}>Cancel</Text>
+          </TouchableOpacity>
+          </View>
+          </View>
+      </Modal>
+
+      <Modal 
+        transparent 
+        visible={selectionModalVisible} 
+        animationType="slide" 
+        onRequestClose={() => setSelectionModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+        <View style={styles.confirmationModalContent}>
+        <Text style={styles.modalTitle}>Confirm Your Size</Text>
+      
+        <View style={styles.imageSizeContainer}>
+          {/* Left side - Big image */}
+          <View style={styles.imagePreviewContainer}>
+            {selectedImage && (
+              <Image 
+                source={{uri: selectedImage}} 
+                style={styles.largePreviewImage}
+                resizeMode="contain"
+              />
+            )}
+          </View>
+        
+          {/* Right side - Size selection */}
+          <View style={styles.sizeSelectionContainer}>
+            <Text style={styles.sizeTitle}>Select your size:</Text>
+            {['XS', 'S', 'M', 'L', 'XL'].map((size) => (
+              <TouchableOpacity
+                key={size}
+                style={[
+                styles.sizeButton,
+                selectedSize === size && styles.sizeButtonSelected
+              ]}
+              onPress={() => setSelectedSize(size)}
+            >
+              <Text style={styles.sizeButtonText}>{size}</Text>
+            </TouchableOpacity>
+          ))}
+          </View>
+          </View>
+
+        {/* Action buttons */}
+        <View style={styles.modalActions}>
+          <TouchableOpacity 
+          style={[styles.actionButton, styles.secondaryButton]}
+          onPress={() => setSelectionModalVisible(false)}
+          >
+            <Text style={styles.actionButtonText}>Back</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+          style={[styles.actionButton, styles.primaryButton]}
+          onPress={handleSizeConfirm}
+          disabled={!selectedSize}
+        >
+          <Text style={styles.actionButtonText}>Confirm</Text>
+        </TouchableOpacity>
+        </View>
+        </View>
+        </View>
+      </Modal>
+
+      <Modal transparent visible={finalResult} animationType="slide" onRequestClose={() => setFinalResult(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.resultsModalContent}>
+              <Text style={styles.modalTitle}>Your Size Results</Text>
+              {shirtResult && (
+                <Text style={styles.resultText}>{shirtResult}</Text>
+              )}
+
+              <TouchableOpacity style={[styles.actionButton, styles.primaryButton]} onPress={handleFindStores}>
+                <Text style={styles.actionButtonText}>Find Nearby Stores</Text>
+              </TouchableOpacity>
+
+              {storeResults.length > 0 && (
+                <View style={styles.storesContainer}>
+                  <Text style={styles.storesTitle}>Recommended Stores:</Text>
+                  <ScrollView style={styles.storesScrollView}>
+                    {storeResults.map((store, index) => (
+                      <View key={index} style={styles.storeItem}>
+                        <Text style={styles.storeName}>{store.name}</Text>
+                        <Text style={styles.storeAddress}>{store.address}</Text>
+                        <Text style={styles.storeDistance}>{store.distanceMeters} meters away</Text>
+                      </View>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+
+              <TouchableOpacity style={[styles.actionButton, styles.secondaryButton]} onPress={() => { 
+                setFinalResult(false); 
+                setStoreResults([]); 
+              }}>
+                <Text style={styles.actionButtonText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+      </Modal>
+
+    </ScrollView>
+  );
+}
+
+
+const styles = StyleSheet.create({
+  container: { 
+    flex: 1, 
+    backgroundColor: "#11d5cf", 
+  }, 
+  centerContent: { 
+    borderWidth: 2, 
+    borderColor: "#7EC8E3", 
+    borderRadius: 3, 
+    alignItems: "center", 
+    justifyContent: "center", 
+    backgroundColor: "#7EC8E3", 
+  }, 
+  title: { 
+    fontSize: 38, 
+    fontWeight: "bold", 
+    marginBottom: 10, 
+    textAlign: 'center', 
+    paddingTop: 20, 
+  }, 
+  button: { 
+    backgroundColor: "#60A3D9", 
+    borderRadius: 5, 
+    paddingVertical: 10, 
+    paddingHorizontal: 10, 
+    marginBottom: 20, 
+  }, 
+  buttonText: { 
+    fontSize: 30, 
+    fontWeight: '500',
+    color: "#222", 
+  }, 
+  storesSection: { 
+    marginTop: 24, 
+    marginHorizontal: 20, 
+  }, 
+  storesTitle: { 
+    fontSize: 16, 
+    fontWeight: 'bold', 
+    marginBottom: 4, 
+  }, 
+  storesSubheading: { 
+    fontSize: 15, 
+    color: "#555", 
+    marginBottom: 22, 
+  }, 
+  storesGrid: { 
+    flexDirection: "row", 
+    justifyContent: 'space-between', 
+    flexWrap: 'wrap', 
+  }, 
+  storesCard: { 
+    width: "45%", 
+    marginBottom: 24, 
+    flexDirection: "row", 
+    alignItems: 'flex-start', 
+    gap: 5, 
+  }, 
+  storesIcon: { 
+    fontSize: 15, 
+  }, 
+  storesBody: { 
+    fontSize: 13, 
+    color: "#555", 
+  }, 
+  storesImage: { 
+    textAlign: 'center', 
+    justifyContent: 'center',
+    marginTop: 44, 
+  }, 
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    textAlign: 'center',
+    color: '#222',
+  },
+  
+  // Image Selection Modal specific
+  selectionModalContent: {
+    width: '80%',
+    maxWidth: 350,
+    backgroundColor: 'white',
+    borderRadius: 15,
+    padding: 25,
+  },
+  imageOptionButton: {
+    padding: 15,
+    borderRadius: 10,
+    backgroundColor: '#11f8f1',
+    marginBottom: 12,
+  },
+  imageOptionText: {
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  cancelButton: {
+    backgroundColor: '#e0e0e0',
+    marginTop: 10,
+  },
+  
+  // Size Confirmation Modal specific
+  confirmationModalContent: {
+    width: '35%',
+    maxWidth: 600,
+    backgroundColor: 'white',
+    borderRadius: 15,
+    padding: 20,
+  },
+  imageSizeContainer: {
+    flexDirection: 'row',
+    marginBottom: 20,
+  },
+  imagePreviewContainer: {
+    flex: 0.7,
+    paddingRight: 15,
+  },
+  largePreviewImage: {
+    width: '100%',
+    height: undefined,
+    aspectRatio: 3/4,
+    borderRadius: 15,
+    borderWidth: 5,
+    borderColor: '#f0f0f0',
+  },
+  sizeSelectionContainer: {
+    flex: 0.3,
+  },
+  sizeTitle: {
+    marginBottom: 15,
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  sizeButton: {
+    paddingVertical: 10,
+    marginBottom: 7,
+    borderRadius: 7,
+    backgroundColor: 'grey',
+    alignItems: 'center',
+  },
+  sizeButtonSelected: {
+    backgroundColor: 'blue',
+  },
+  sizeButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  sizeButtonSelectedText: {
+    color: 'white',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  actionButton: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  primaryButton: {
+    backgroundColor: '#000',
+  },
+  secondaryButton: {
+    backgroundColor: '#ccc',
+    marginRight: 10,
+  },
+  actionButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  resultsModalContent: {
+    width: '90%',
+    maxWidth: 400,
+    backgroundColor: 'white',
+    borderRadius: 15,
+    padding: 20,
+    maxHeight: '80%',
+  },
+  resultText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginVertical: 20,
+    color: '#333',
+  },
+  storesContainer: {
+    marginTop: 20,
+    width: '100%',
+  },
+  storeTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  storesScrollView: {
+    maxHeight: 200,
+    marginBottom: 15,
+  },
+  storeItem: {
+    padding: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  storeName: {
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  storeAddress: {
+    color: '#555',
+    fontSize: 14,
+  },
+  storeDistance: {
+    color: '#777',
+    fontSize: 13,
+    fontStyle: 'italic',
+  },
+})
