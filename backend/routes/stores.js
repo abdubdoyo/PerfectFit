@@ -12,6 +12,25 @@ if (!GOOGLE_KEY) {
 
 console.log("Using Google API Key:", GOOGLE_KEY ? "***REDACTED***" : "MISSING");
 
+// ... keep your existing haversine function ...
+function haversine(lat1, lon1, lat2, lon2){
+    const R = 6371000;
+    const toRad = (x) => (x * Math.PI) / 180;
+
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+
+    const a = 
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(lat1)) *
+        Math.cos(toRad(lat2)) *
+        Math.sin(dLon / 2) ** 2;
+
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c;
+}
+
 // Add detailed error logging
 router.post('/api/recommendations', async (req, res) => {
     console.log('Received request with body:', req.body);
@@ -79,6 +98,6 @@ async function findNearbyStores(lat, lng) {
     }));
 }
 
-// ... keep your existing haversine function ...
+
 
 module.exports = router;
