@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const router = express.Router();
+const checkStoreInventory = require('./geminiCheckStore'); 
 require('dotenv').config(); 
 
 const GOOGLE_KEY = process.env.GOOGLE_PLACE_KEY;
@@ -54,8 +55,15 @@ router.post('/api/recommendations', async (req, res) => {
         const ranked = stores.sort((a, b) => a.distanceMeters - b.distanceMeters);
         const results = ranked.slice(0, 10);
         
+        const filtered = [];
+        for(const store of results ){
+            const check = await checkStoreInventory(store.name, size);
+            if(check.hasSize){
+                filtered.push({...store, url: check.url});
+            }
+        }
         console.log(`Returning ${results.length} stores`);
-        res.json(results);
+        res.json(filtered);
     }
     catch (err) {
         console.error('Full error:', err);
