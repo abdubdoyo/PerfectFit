@@ -4,12 +4,17 @@ require('dotenv').config();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 async function checkStoreInventory(storeName, size){
-    const model = genAI.getGenerativeModel({model: 'gemini-1.5-pro'});
+    const model = genAI.getGenerativeModel({model: 'gemini-2.5-pro'});
 
     const prompt = `Does the store "${storeName}" (a clothing store in Toronto) sell t-shirts in size ${size}? If yes, provide the website URL if known. Respond in JSON Like this: {"hasSize": true, "url": "https: //example.com"}`;
 
     const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    let text = result.response.text();
+
+    // Remove markdown code block if it exists
+    if (text.startsWith("```")) {
+        text = text.replace(/```json|```/g, "").trim();
+    }
     
     try{
         const json = JSON.parse(text);

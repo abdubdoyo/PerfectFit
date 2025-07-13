@@ -55,8 +55,9 @@ router.post('/api/recommendations', async (req, res) => {
         const ranked = stores.sort((a, b) => a.distanceMeters - b.distanceMeters);
         const results = ranked.slice(0, 10);
         
+        const topFew = results.slice(0,3);
         const filtered = [];
-        for(const store of results ){
+        for(const store of topFew ){
             const check = await checkStoreInventory(store.name, size);
             if(check.hasSize){
                 filtered.push({...store, url: check.url});
@@ -78,7 +79,7 @@ router.post('/api/recommendations', async (req, res) => {
 });
 
 async function findNearbyStores(lat, lng) {
-    const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=5000&type=clothing_store&key=${GOOGLE_KEY}`;
+    const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=10000&type=clothing_store&key=${GOOGLE_KEY}`;
     
     console.log('Making Google Places API request to:', url);
     const { data } = await axios.get(url);

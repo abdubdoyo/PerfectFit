@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import {
   View,
+  Linking,
   Text,
   Image,
   ScrollView,
@@ -434,6 +435,7 @@ function StoreCard({ store }: { store: any }) {
       <View style={storeStyles.badge}>
         <Text style={storeStyles.badgeText}>{store.distanceMeters} m</Text>
       </View>
+      <Text style={storeStyles.url} onPress={() => Linking.openURL(store.url)}>{store.url}</Text>
     </View>
   );
 }
@@ -596,4 +598,10 @@ const storeStyles = StyleSheet.create({
     borderRadius: radii.button,
   },
   badgeText: { color: "#fff", fontSize: 12 },
+  url:{
+    color: colors.primaryDark,
+    fontSize: 12,
+    marginTop: 2,
+    textDecorationLine: 'underline',
+  },
 });
