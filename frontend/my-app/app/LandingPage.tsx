@@ -147,6 +147,9 @@ export default function LandingPage() {
   // location ready flag
   const [locationReady, setLocationReady] = useState(false);
 
+  // show stores flag
+  const [showStores, setShowStores] = useState(false);
+
   // auth check
   useEffect(() => {
     (async () => {
@@ -280,6 +283,8 @@ export default function LandingPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to fetch stores");
       setStoreResults(data);
+      setShowStores(true);
+      setResultModal(false);
     } catch (e: any) {
       Alert.alert(e.message || "Could not fetch stores");
     } finally {
@@ -301,6 +306,32 @@ export default function LandingPage() {
         onTakePhoto={() => setPickModal(true)}
         onUploadPhoto={() => handleImagePick(false)}
       />
+
+      {/* STORES SECTION */}
+      {showStores && (
+        <View style={storesSection.container}>
+          <Text style={storesSection.title}>Recommended Stores</Text>
+          {shirtResult && (
+            <Text style={storesSection.subtitle}>{shirtResult}</Text>
+          )}
+          <ScrollView style={storesSection.storesList}>
+            {storeResults.map((store, i) => (
+              <StoreCard key={i} store={store} />
+            ))}
+          </ScrollView>
+          <SecondaryButton 
+            label="Start Over" 
+            onPress={() => {
+              setShowStores(false);
+              setStoreResults([]);
+              setSelectedImage(null);
+              setSelectedSize(null);
+              setShirtResult(null);
+            }} 
+            style={{ marginTop: 16 }}
+          />
+        </View>
+      )}
 
       {/* PICK OPTION MODAL */}
       <Modal transparent visible={pickModal} animationType="fade">
@@ -360,20 +391,8 @@ export default function LandingPage() {
               disabled={loadingStores}
             />
 
-            {storeResults.length > 0 && (
-              <View style={{ width: "100%" }}>
-                <Text style={modal.subtitle}>Recommended stores</Text>
-                <ScrollView style={{ maxHeight: 250 }}>
-                  {storeResults.map((s, i) => (
-                    <StoreCard key={i} store={s} />
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-
             <SecondaryButton label="Close" onPress={() => {
               setResultModal(false);
-              setStoreResults([]);
             }} />
           </View>
         </View>
@@ -603,5 +622,34 @@ const storeStyles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
     textDecorationLine: 'underline',
+  },
+});
+
+const storesSection = StyleSheet.create({
+  container: {
+    width: "90%",
+    maxWidth: 480,
+    backgroundColor: colors.card,
+    borderRadius: radii.card,
+    padding: 24,
+    marginTop: 24,
+    ...shadow,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: "700",
+    color: colors.text,
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: colors.text,
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  storesList: {
+    maxHeight: 400,
   },
 });
