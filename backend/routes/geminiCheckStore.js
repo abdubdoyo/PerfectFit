@@ -1,36 +1,40 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const matchImageToStore = require('../imageMatcher'); 
 require('dotenv').config();
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-async function checkStoreInventory(storeName, size){
+async function checkStoreInventory(storeName, size, imageBase64 = null){
     const model = genAI.getGenerativeModel({model: 'gemini-2.5-pro'});
 
-    const prompt = `Does the store "${storeName}" (a clothing store in Toronto) sell t-shirts in size ${size}? If yes, provide the website URL if known. Respond in JSON Like this: {"hasSize": true, "url": "https: //example.com"}`;
+    // First check if the store carries the size 
+    const prompt = `Does the store "${storeName}" (a clothing store) sell t-shirts in size ${size}? If yes, provide the website URL if known. Respond in JSON Like this: {"hasSize": true, "url": "https: //example.com"}`;
 
     const result = await model.generateContent(prompt);
-    let text = result.response.text();
-
-    // Remove markdown code block if it exists
-    if (text.startsWith("```")) {
-        text = text.replace(/```json|```/g, "").trim();
-    }
+    let sizeText = result.response.text();
+    sizetext = sizeText.replace(/```json|```/g,"").trim(); 
     
+    let sizeCheck; 
+
     try{
-        const json = JSON.parse(text);
-        return json;
+        sizeCheck = JSON.parse(sizeText); 
     }catch(e){
-        if(e.response?.status === 429){
-            console.warn("Rate limit hit. Skipping store:", storeName);
-            return {hasSize: false, url: null};
-        }
-        console.error("Could not parse GEMINI response:", e);
-        return{
-            hasSize: false,
-            url: null
-        };
+        console.error('Could not parse size check response: ', e); 
+        sizeCheck = {hasSize: false, url: null}; 
     }
 
+    // If there's an image, check if it matches the store's style
+    let imageMatch = {match: true, confidence: 1, reason: 'No image provided'}; 
+    if (imageBase64) { 
+        imageMatch = await matchImageToStore(imageBase64, storeName); 
+    }
+
+    return { 
+        ...sizeCheck, 
+        imageMatch: imageMatch.match, 
+        matchConfidence: imageMatch.confidence, 
+        matchReason: imageMatch.reason 
+    }; 
 };
 
 module.exports = checkStoreInventory;

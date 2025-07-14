@@ -253,7 +253,7 @@ export default function LandingPage() {
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Something went wrong");
+      if (!res.ok) throw new Error(data.error || "Unable to estimate size. Try retaking the photo.");
 
       setShirtResult(data.message);
       setSizeModal(false);
@@ -267,28 +267,55 @@ export default function LandingPage() {
 
   // fetch nearby stores
   const handleFindStores = async () => {
-    if (!shirtResult) return;
+    if (!shirtResult || !selectedImage) return;
     try {
       setLoadingStores(true);
       const { lat, lng } = await getCoords();
+
+      const formData = new FormData(); 
+
+      if (Platform.OS === 'web') { 
+        const resp = await fetch(selectedImage); 
+        const blob = await resp.blob(); 
+        formData.append("image", blob, "outfit.jpg"); 
+      }
+      else { 
+        const fileName = selectedImage.split("/").pop() || "outfit.jpg"; 
+        const type = fileName.endsWith(".png") ? "image/png" : "image/jpeg"; 
+        formData.append("image", { 
+          uri: selectedImage, 
+          name: fileName, 
+          type, 
+        } as any); 
+      }
+      const sizeLetter = shirtResult.match(/size: (\w+)/i)?.[1] || ''; 
+      formData.append("size", sizeLetter); 
+      formData.append("lat", lat.toString());
+      formData.append("lng", lng.toString());
+  
       const res = await fetch("http://localhost:3000/api/recommendations", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          size: shirtResult.replace("Estimated shirt size: ", ""),
-          lat,
-          lng,
-        }),
+        body: formData,
       });
+  
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to fetch stores");
-      setStoreResults(data);
+      if (!res.ok) throw new Error(data.error || "Store fetch failed");
+      
+      const enhancedStores = data.map((store: { distanceMeters: number; matchConfidence: number; }) => ({
+        ...store, 
+        displayDistance: store.distanceMeters > 10000 ? `${(store.distanceMeters * 0.001).toFixed(1)} km` : `${(store.distanceMeters)} m`, 
+        matchQuality: store.matchConfidence > 0.8 ? 'High' : store.matchConfidence > 0.5 ? 'Medium' : 'Low'
+      })); 
+
+      setStoreResults(enhancedStores); // Now includes match details
       setShowStores(true);
       setResultModal(false);
-    } catch (e: any) {
-      Alert.alert(e.message || "Could not fetch stores");
-    } finally {
-      setLoadingStores(false);
+    }
+    catch (e: any) { 
+      Alert.alert('Error', e.message); 
+    }
+    finally { 
+      setLoadingStores(false); 
     }
   };
 
@@ -451,10 +478,27 @@ function StoreCard({ store }: { store: any }) {
     <View style={storeStyles.card}>
       <Text style={storeStyles.name}>{store.name}</Text>
       <Text style={storeStyles.addr}>{store.address}</Text>
-      <View style={storeStyles.badge}>
-        <Text style={storeStyles.badgeText}>{store.distanceMeters} m</Text>
+
+      <View style={storeStyles.detailsRow}>
+        <View style={[storeStyles.badge, store.matchQuality === 'High' && {backgroundColor: '#4CAF50'}, store.matchQuality === 'Medium' && {backgroundColor: '#FFC107'}, store.matchQuality === 'Low' && {backgroundColor: '#F44336'}]}>
+          <Text style={storeStyles.badgeText}>{store.matchQuality} match</Text>
+        </View>
+
+        <View style={storeStyles.badge}>
+          <Text style={storeStyles.badgeText}>{store.displayDistance}</Text>
+        </View>
       </View>
-      <Text style={storeStyles.url} onPress={() => Linking.openURL(store.url)}>{store.url}</Text>
+
+      {store.matchReason && (
+        <Text style={storeStyles.matchReason}>{store.displayDistance}</Text>
+      )}
+
+      {store.url && (
+        <Text style={storeStyles.url} onPress={() => Linking.openURL(store.url)}>
+          View Online
+        </Text>
+      )}
+
     </View>
   );
 }
@@ -623,6 +667,17 @@ const storeStyles = StyleSheet.create({
     marginTop: 2,
     textDecorationLine: 'underline',
   },
+  detailsRow: {
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    marginTop: 8, 
+  }, 
+  matchReason: { 
+    fontSize: 12, 
+    color: '#666', 
+    marginTop: 8, 
+    fontStyle: 'italic', 
+  }, 
 });
 
 const storesSection = StyleSheet.create({
@@ -652,4 +707,4 @@ const storesSection = StyleSheet.create({
   storesList: {
     maxHeight: 400,
   },
-});
+}) 

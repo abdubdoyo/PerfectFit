@@ -3,8 +3,12 @@ const axios = require('axios');
 const router = express.Router();
 const checkStoreInventory = require('./geminiCheckStore'); 
 require('dotenv').config(); 
-
+const multer = require('multer'); 
+const upload = multer(); 
 const GOOGLE_KEY = process.env.GOOGLE_PLACE_KEY;
+
+const KNOWN_CLOTHING_BRANDS = ['H&M', 'Uniqlo', 'Zara', 'Bluenotes', 'Gap', 'Old Navy', 'Banana Republic', 'Forever 21', 'American Eagle', 'Lululemon', 'Aritzia', 'Urban Outfitters', 'Hollister', 'Express', 'J.Crew', 'Nordstorm', 'Marshalls', 'Winners', 'TJ Maxx', 'Aritzia', 'Abercrombie & Fitch', 'Adidas', 'Nike', 'Puma', 'Guess'
+]; 
 
 if (!GOOGLE_KEY) {
   console.error("FATAL: Google Places API key not configured!");
@@ -33,11 +37,12 @@ function haversine(lat1, lon1, lat2, lon2){
 }
 
 // Add detailed error logging
-router.post('/api/recommendations', async (req, res) => {
+router.post('/api/recommendations', upload.single('image'), async (req, res) => {
     console.log('Received request with body:', req.body);
     
     try {
-        const { size, lat, lng } = req.body; // Removed await since req.body doesn't need it
+        const { size, lat, lng} = req.body; // Removed await since req.body doesn't need it
+        const image = req.file; 
 
         if (!size || !lat || !lng) {
             console.error('Missing parameters:', { size, lat, lng });
@@ -52,25 +57,20 @@ router.post('/api/recommendations', async (req, res) => {
             return res.status(404).json({ error: 'No clothing stores found nearby' });
         }
 
-        const ranked = stores.sort((a, b) => a.distanceMeters - b.distanceMeters);
-        const results = ranked.slice(0, 10);
-        
-        const topFew = results.slice(0,3);
-        const filtered = [];
-        for(const store of topFew ){
-            const check = await checkStoreInventory(store.name, size);
-            if(check.hasSize){
-                filtered.push({...store, url: check.url});
-            }
+        const filtered = results.filter(store => 
+            store.hasSize && (!image || store.imageMatch)
+        ); 
+
+        if (image) { 
+            filtered.sort((a,b) => b.matchConfidence - a.matchConfidence); 
         }
-        console.log(`Returning ${results.length} stores`);
-        res.json(filtered);
+        else { 
+            filtered.sort((a,b) => a.distanceMeters - b.distanceMeters); 
+        }
+        res.json(filtered.slice(0,5));  
     }
     catch (err) {
-        console.error('Full error:', err);
-        if (err.response) {
-            console.error('Google API response error:', err.response.data);
-        }
+        console.error('Recommendation error:', err);
         res.status(500).json({ 
             error: 'Failed to get store recommendations',
             details: err.message 
@@ -79,34 +79,69 @@ router.post('/api/recommendations', async (req, res) => {
 });
 
 async function findNearbyStores(lat, lng) {
-    const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=10000&type=clothing_store&key=${GOOGLE_KEY}`;
-    
-    console.log('Making Google Places API request to:', url);
-    const { data } = await axios.get(url);
-    
-    if (data.status !== 'OK') {
-        throw new Error(`Google Places API error: ${data.status}`);
-    }
-
-    return data.results.map(r => ({
-        placeId: r.place_id,
-        name: r.name,
-        address: r.vicinity,
-        rating: r.rating,
-        distanceMeters: haversine(
-            lat, lng,
-            r.geometry.location.lat,
-            r.geometry.location.lng
-        ),
-        // Convert meters to miles for frontend
-        distance: (haversine(
-            lat, lng,
-            r.geometry.location.lat,
-            r.geometry.location.lng
-        ) * 0.000621371).toFixed(1) // meters to miles
-    }));
+    async function findNearbyStores(lat, lng) {
+        const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=10000&type=clothing_store&key=${GOOGLE_KEY}`;
+        
+        console.log('Making Google Places API request to:', url);
+        
+        try {
+          const { data } = await axios.get(url);
+          
+          if (data.status !== 'OK') {
+            console.error('Google Places API error:', data.status);
+            return [];
+          }
+      
+          if (!data.results || !Array.isArray(data.results)) {
+            console.error('Invalid API response format - missing results array');
+            return [];
+          }
+      
+          // Process and filter stores
+          const validStores = data.results
+            .filter(store => {
+              // Validate required fields exist
+              return store && 
+                     store.place_id && 
+                     store.name && 
+                     store.vicinity && 
+                     store.geometry && 
+                     store.geometry.location;
+            })
+            .filter(store => 
+              KNOWN_CLOTHING_BRANDS.some(brand =>
+                store.name.toLowerCase().includes(brand.toLowerCase())
+              )
+            )
+            .map(store => {
+              // Calculate distance
+              const distanceMeters = haversine(
+                lat, lng,
+                store.geometry.location.lat,
+                store.geometry.location.lng
+              );
+              
+              return {
+                placeId: store.place_id,
+                name: store.name,
+                address: store.vicinity,
+                rating: store.rating || 0, // Default to 0 if no rating
+                distanceMeters: distanceMeters,
+                distance: (distanceMeters * 0.000621371).toFixed(1) + ' miles'
+              };
+            });
+      
+          console.log(`Found ${validStores.length} valid stores`);
+          return validStores;
+      
+        } catch (err) {
+          console.error('Full error fetching stores:', err);
+          if (err.response) {
+            console.error('Google API response error:', err.response.data);
+          }
+          return [];
+        }
+    }      
 }
-
-
 
 module.exports = router;
