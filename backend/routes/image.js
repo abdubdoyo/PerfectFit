@@ -4,6 +4,12 @@ const router = express.Router();
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+const {GoogleGenerativeAI} = require('@google/generative-ai'); 
+const sharp = require('sharp'); 
+require('dotenv').config(); 
+
+// Initializing AI Model 
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY); 
 
 // TensorFlow.js & Pose Detection
 const tf = require('@tensorflow/tfjs');
@@ -29,6 +35,53 @@ loadModel();
 function calculateDistance(p1, p2) {
   return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
 }
+
+// AI Clothing Size Estimation
+async function estimateClothingSizeAI(imagePath) { 
+  try { 
+    const processedImage = await sharp(imagePath).resize(800, 800, {fit: 'inside', withoutEnlargement: true}).jpeg({quality: 80}).toBuffer(); 
+
+    const model = genAI.getGenerativeModel({model: 'gemini-pro-vision'}); 
+
+    const prompt = `Analyze this clothing item image and estimate its size based on: 
+      - Visual proportions compared to standard sizing charts
+      - Brand sizing standards if visible
+
+      Respond only with JSON format: 
+      { 
+        "size": "estimated size (XS/S/M/L/XL)" , 
+        "dimensions": { 
+          "shoulderWidthCm": number, 
+          "chestWidthCm": number, 
+          "lengthCm": number, 
+          "torsoLength": number, 
+          "confidence": 0-1
+        }
+      }
+    `; 
+
+
+    const imageParts = [{
+      inlineData: { 
+        data: processedImage.toString('base64'), 
+        mimeType: 'image/jpeg'
+      }
+    }]; 
+
+    const result = await model.generateContent([prompt, ...imageParts]); 
+    const response = JSON.parse(result.response.text().replace(/```json\```/g, '').trim()); 
+
+    return { 
+      size: response.size, 
+      dimensions: response.dimensions
+    }; 
+  }
+  catch (error) { 
+    console.error('AI size estimation failed: ', error); 
+    return null; 
+  }
+}
+
 
 async function estimateShoulderWidth(imagePath) {
   const image = await loadImage(imagePath);
@@ -113,26 +166,53 @@ function mapToSize(widthCm) {
 router.post('/api/estimate-shirt-size', upload.single('photo'), async (req, res) => {
   try {
     const imagePath = path.join(__dirname, '../', req.file.path);
-    const { shoulderWidthPx, torsoLengthPx } = await estimateShoulderWidth(imagePath);
-    const widthCm = estimateCmFromTorsoRatio(shoulderWidthPx, torsoLengthPx);
-    const size = mapToSize(widthCm);
-    const userSize = req.body.userSize;
-
-    let sizeMatch = null;
-    if (userSize) {
-      sizeMatch = userSize === size;
-      if (!sizeMatch) console.warn(`Discrepancy: User selected ${userSize}, model predicted ${size}`);
-    }
-
-    fs.unlinkSync(imagePath);
-
-    res.json({
-      size,
-      shoulderWidthCm: widthCm.toFixed(2),
-      userSize,
-      sizeMatch,
-      message: `Estimated shirt size: ${size}` + (userSize ? ` (You selected: ${userSize})` : ''),
-    });
+    const userSize = req.body.userSize; 
+    const [poseEstimation, aiEstimation] = await Promise.all([
+      estimateShoulderWidth(imagePath).then(({ shoulderWidthPx, torsoLengthPx }) => {
+        const widthCm = estimateCmFromTorsoRatio(shoulderWidthPx, torsoLengthPx);
+        return {
+          method: 'pose',
+          size: mapToSize(widthCm),
+          confidence: 0.8, // Default confidence for pose estimation
+          dimensions: {
+            shoulderWidthCm: widthCm.toFixed(2)
+          }
+        };
+      }),
+      estimateClothingSizeAI(imagePath)
+    ]); 
+       // Combine results
+        const combinedResult = {
+          poseEstimation,
+          aiEstimation,
+          finalSize: aiEstimation ? 
+            (aiEstimation.confidence > 0.7 ? aiEstimation.size : poseEstimation.size) : 
+            poseEstimation.size,
+          combinedDimensions: aiEstimation?.dimensions ? {
+            shoulderWidthCm: (
+              parseFloat(poseEstimation.dimensions.shoulderWidthCm) + 
+              aiEstimation.dimensions.shoulderWidthCm
+            ) / 2
+          } : poseEstimation.dimensions
+        };
+    
+        // Compare with user size if provided
+        if (userSize) {
+          combinedResult.userComparison = {
+            userSize,
+            matchesPose: userSize === poseEstimation.size,
+            matchesAI: aiEstimation ? userSize === aiEstimation.size : null,
+            agreement: poseEstimation.size === (aiEstimation?.size || poseEstimation.size)
+          };
+        }
+    
+        fs.unlinkSync(imagePath);
+    
+        res.json({
+          ...combinedResult,
+          message: `Recommended size: ${combinedResult.finalSize}` +
+            (userSize ? ` (You selected: ${userSize})` : '')
+        });
   } catch (error) {
     console.error(error);
     const message = error.message || 'Pose estimation failed';
