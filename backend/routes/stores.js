@@ -57,9 +57,13 @@ router.post('/api/recommendations', upload.single('image'), async (req, res) => 
             return res.status(404).json({ error: 'No clothing stores found nearby' });
         }
 
-        const filtered = results.filter(store => 
-            store.hasSize && (!image || store.imageMatch)
-        ); 
+        const filtered = [];
+        for(const store of stores){
+            const result = await checkStoreInventory(store.name, size);
+            if(result.hasSize){
+                filtered.push({...store, url: result.url});
+            }
+        }
 
         if (image) { 
             filtered.sort((a,b) => b.matchConfidence - a.matchConfidence); 
@@ -79,69 +83,68 @@ router.post('/api/recommendations', upload.single('image'), async (req, res) => 
 });
 
 async function findNearbyStores(lat, lng) {
-    async function findNearbyStores(lat, lng) {
-        const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=10000&type=clothing_store&key=${GOOGLE_KEY}`;
+    const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=100000&type=clothing_store&key=${GOOGLE_KEY}`;
+    
+    console.log('Making Google Places API request to:', url);
+    
+    try {
+    const { data } = await axios.get(url);
+    
+    if (data.status !== 'OK') {
+        console.error('Google Places API error:', data.status);
+        return [];
+    }
+
+    if (!data.results || !Array.isArray(data.results)) {
+        console.error('Invalid API response format - missing results array');
+        return [];
+    }
+
+    // Process and filter stores
+    const validStores = data.results
+        .filter(store => {
+        // Validate required fields exist
+        return store && 
+                store.place_id && 
+                store.name && 
+                store.vicinity && 
+                store.geometry && 
+                store.geometry.location;
+        })
+        .filter(store => 
+        KNOWN_CLOTHING_BRANDS.some(brand =>
+            store.name.toLowerCase().includes(brand.toLowerCase())
+        )
+        )
+        .map(store => {
+        // Calculate distance
+        const distanceMeters = haversine(
+            lat, lng,
+            store.geometry.location.lat,
+            store.geometry.location.lng
+        );
         
-        console.log('Making Google Places API request to:', url);
-        
-        try {
-          const { data } = await axios.get(url);
-          
-          if (data.status !== 'OK') {
-            console.error('Google Places API error:', data.status);
-            return [];
-          }
-      
-          if (!data.results || !Array.isArray(data.results)) {
-            console.error('Invalid API response format - missing results array');
-            return [];
-          }
-      
-          // Process and filter stores
-          const validStores = data.results
-            .filter(store => {
-              // Validate required fields exist
-              return store && 
-                     store.place_id && 
-                     store.name && 
-                     store.vicinity && 
-                     store.geometry && 
-                     store.geometry.location;
-            })
-            .filter(store => 
-              KNOWN_CLOTHING_BRANDS.some(brand =>
-                store.name.toLowerCase().includes(brand.toLowerCase())
-              )
-            )
-            .map(store => {
-              // Calculate distance
-              const distanceMeters = haversine(
-                lat, lng,
-                store.geometry.location.lat,
-                store.geometry.location.lng
-              );
-              
-              return {
-                placeId: store.place_id,
-                name: store.name,
-                address: store.vicinity,
-                rating: store.rating || 0, // Default to 0 if no rating
-                distanceMeters: distanceMeters,
-                distance: (distanceMeters * 0.000621371).toFixed(1) + ' miles'
-              };
-            });
-      
-          console.log(`Found ${validStores.length} valid stores`);
-          return validStores;
-      
-        } catch (err) {
-          console.error('Full error fetching stores:', err);
-          if (err.response) {
-            console.error('Google API response error:', err.response.data);
-          }
-          return [];
-        }
-    }      
+        return {
+            placeId: store.place_id,
+            name: store.name,
+            address: store.vicinity,
+            rating: store.rating || 0, // Default to 0 if no rating
+            distanceMeters: distanceMeters,
+            distance: (distanceMeters * 0.000621371).toFixed(1) + ' miles'
+        };
+        });
+
+    console.log(`Found ${validStores.length} valid stores`);
+    return validStores;
+
+    } catch (err) {
+    console.error('Full error fetching stores:', err);
+    if (err.response) {
+        console.error('Google API response error:', err.response.data);
+    }
+    return [];
+    }
+     
 }
 
 module.exports = router;

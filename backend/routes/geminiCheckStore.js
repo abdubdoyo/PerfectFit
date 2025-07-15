@@ -12,7 +12,7 @@ async function checkStoreInventory(storeName, size, imageBase64 = null){
 
     const result = await model.generateContent(prompt);
     let sizeText = result.response.text();
-    sizetext = sizeText.replace(/```json|```/g,"").trim(); 
+    sizeText = sizeText.replace(/```json|```/g,"").trim(); 
     
     let sizeCheck; 
 

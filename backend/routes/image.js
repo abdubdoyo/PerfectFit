@@ -41,7 +41,7 @@ async function estimateClothingSizeAI(imagePath) {
   try { 
     const processedImage = await sharp(imagePath).resize(800, 800, {fit: 'inside', withoutEnlargement: true}).jpeg({quality: 80}).toBuffer(); 
 
-    const model = genAI.getGenerativeModel({model: 'gemini-pro-vision'}); 
+    const model = genAI.getGenerativeModel({model: 'gemini-1.5-flash'}); 
 
     const prompt = `Analyze this clothing item image and estimate its size based on: 
       - Visual proportions compared to standard sizing charts
@@ -68,7 +68,22 @@ async function estimateClothingSizeAI(imagePath) {
       }
     }]; 
 
-    const result = await model.generateContent([prompt, ...imageParts]); 
+    const result = await model.generateContent({
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: prompt },
+            {
+              inlineData: {
+                mimeType: "image/jpeg",
+                data: processedImage.toString('base64')
+              }
+            }
+          ]
+        }
+      ]
+    });
     const response = JSON.parse(result.response.text().replace(/```json\```/g, '').trim()); 
 
     return { 
@@ -206,7 +221,15 @@ router.post('/api/estimate-shirt-size', upload.single('photo'), async (req, res)
           };
         }
     
-        fs.unlinkSync(imagePath);
+        setTimeout(() => {
+          try{
+            fs.unlinkSync(imagePath);
+          }
+          catch(e){
+            console.warn("Failed to delete image file: ", e);
+          }
+        }, 500);
+       
     
         res.json({
           ...combinedResult,
