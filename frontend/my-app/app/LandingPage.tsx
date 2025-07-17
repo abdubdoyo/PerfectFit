@@ -301,9 +301,9 @@ export default function LandingPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Store fetch failed");
       
-      const enhancedStores = data.map((store: { distanceMeters: number; matchConfidence: number; }) => ({
-        ...store, 
-        displayDistance: store.distanceMeters > 10000 ? `${(store.distanceMeters * 0.001).toFixed(1)} km` : `${(store.distanceMeters)} m`, 
+      const enhancedStores = data.recommendations.map((store: any) => ({
+        ...store.store, 
+        displayDistance: store.store.distanceMeters > 10000 ? `${(store.distanceMeters * 0.001).toFixed(1)} km` : `${(store.distanceMeters)} m`, 
         matchQuality: store.matchConfidence > 0.8 ? 'High' : store.matchConfidence > 0.5 ? 'Medium' : 'Low'
       })); 
 

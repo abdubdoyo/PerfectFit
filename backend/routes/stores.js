@@ -1,150 +1,157 @@
 const express = require('express');
 const axios = require('axios');
 const router = express.Router();
-const checkStoreInventory = require('./geminiCheckStore'); 
 require('dotenv').config(); 
 const multer = require('multer'); 
 const upload = multer(); 
+const {analyzeClothingImage, findNearbyStoresAI} = require('../imageMatcher'); 
 const GOOGLE_KEY = process.env.GOOGLE_PLACE_KEY;
+const {GoogleGenerativeAI} = require('@google/generative-ai'); 
 
-const KNOWN_CLOTHING_BRANDS = ['H&M', 'Uniqlo', 'Zara', 'Bluenotes', 'Gap', 'Old Navy', 'Banana Republic', 'Forever 21', 'American Eagle', 'Lululemon', 'Aritzia', 'Urban Outfitters', 'Hollister', 'Express', 'J.Crew', 'Nordstorm', 'Marshalls', 'Winners', 'TJ Maxx', 'Aritzia', 'Abercrombie & Fitch', 'Adidas', 'Nike', 'Puma', 'Guess'
-]; 
+const KNOWN_CLOTHING_BRANDS = ['H&M', 'Uniqlo', 'Zara', 'Bluenotes', 'Banana Republic', 'Forever 21', 'Guess', 'Lee Cooper', 'Adidas', 'Nike', 'Puma', 'Lululemon', 'Winners', 'Hollister', 'Abercrombie & Fitch', 'Gap', 'Old Navy', 'Express', 'Marshalls', 'Pull & Bear', 'Armani Exchange', 'Polo', 'Calvin Klein', 'Cotton On', 'Giordano', 'Essentials']; 
+
 
 if (!GOOGLE_KEY) {
-  console.error("FATAL: Google Places API key not configured!");
-  process.exit(1);
+    console.error("FATAL: Google Places API key not configured!");
+    process.exit(1);
 }
-
+  
 console.log("Using Google API Key:", GOOGLE_KEY ? "***REDACTED***" : "MISSING");
-
-// ... keep your existing haversine function ...
+  
+// Distance calculation function 
 function haversine(lat1, lon1, lat2, lon2){
     const R = 6371000;
     const toRad = (x) => (x * Math.PI) / 180;
-
+  
     const dLat = toRad(lat2 - lat1);
     const dLon = toRad(lon2 - lon1);
-
+  
     const a = 
         Math.sin(dLat / 2) ** 2 +
         Math.cos(toRad(lat1)) *
         Math.cos(toRad(lat2)) *
         Math.sin(dLon / 2) ** 2;
-
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-    return R * c;
+  
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  
+        return R * c;
 }
 
-// Add detailed error logging
 router.post('/api/recommendations', upload.single('image'), async (req, res) => {
     console.log('Received request with body:', req.body);
-    
+        
     try {
-        const { size, lat, lng} = req.body; // Removed await since req.body doesn't need it
+        const {size, lat, lng} = req.body; // Removed await since req.body doesn't need it
         const image = req.file; 
-
+    
         if (!size || !lat || !lng) {
             console.error('Missing parameters:', { size, lat, lng });
             return res.status(400).json({ error: 'Missing size or coordinates' });
         }
 
-        console.log(`Searching stores near ${lat},${lng} for size ${size}`);
-        const stores = await findNearbyStores(lat, lng);
-
-        if (!stores || stores.length === 0) {
-            console.log('No stores found');
-            return res.status(404).json({ error: 'No clothing stores found nearby' });
+        if (!image) { 
+            console.error('No image uploaded.'); 
+            return res.status(400).json({error: 'No clothing image provided'}); 
         }
 
-        const filtered = [];
-        for(const store of stores){
-            const result = await checkStoreInventory(store.name, size);
-            if(result.hasSize){
-                filtered.push({...store, url: result.url});
-            }
+        console.log(`Searching nearby stores based on your location: ${lat, lng}`); 
+
+        // Step 1: Allow AI to analyze the image that we uploaded
+        const clothingAnalysis = await analyzeClothingImage(image.buffer); 
+        console.log('Clothing analysis results: ', clothingAnalysis); 
+
+        // Step 2: Find the close known clothing brand stores based on the user's location with AI 
+        const stores = await findNearbyStoresAI(lat, lng, KNOWN_CLOTHING_BRANDS); 
+
+        if (!stores || stores.length === 0) { 
+            console.log('No stores found'); 
+            return res.status(404).json({error: 'No clothing stores found nearby'}); 
         }
 
-        if (image) { 
-            filtered.sort((a,b) => b.matchConfidence - a.matchConfidence); 
-        }
-        else { 
-            filtered.sort((a,b) => a.distanceMeters - b.distanceMeters); 
-        }
-        res.json(filtered.slice(0,5));  
+        // Step 3: Match stores with inventory based on image analysis
+        const recommendations = await Promise.all(
+            stores.map(async store => { 
+                try { 
+                    const inventory = await simulateInventoryMatch(store.name, clothingAnalysis); 
+
+                    return { 
+                        store, 
+                        matches: inventory.items
+                    }; 
+                }
+                catch (error) { 
+                    console.error(`Error checking ${store.name}:`, error); 
+                    return { 
+                        store, 
+                        matches: []
+                    }; 
+                }
+            })
+        ); 
+
+        // Filter the stores with matches and sort by distance 
+        const filtered = recommendations.filter(rec => rec.matches.length > 0).sort((a,b) => a.store.distanceMeters - b.store.distanceMeters); 
+
+        res.json({
+            clothingAnalysis, 
+            recommendations: filtered.slice(0,5)
+        }); 
     }
-    catch (err) {
-        console.error('Recommendation error:', err);
-        res.status(500).json({ 
-            error: 'Failed to get store recommendations',
-            details: err.message 
-        });
+    catch (error) {
+        console.error('Failed to get recommendations.'); 
+        res.status(500).json({error: 'Failed to get recommendations.'})
     }
-});
 
-async function findNearbyStores(lat, lng) {
-    const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=100000&type=clothing_store&key=${GOOGLE_KEY}`;
+}); 
+
+
+async function simulateInventoryMatch(storeName, clothingAnalysis) { 
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY); 
     
-    console.log('Making Google Places API request to:', url);
-    
-    try {
-    const { data } = await axios.get(url);
-    
-    if (data.status !== 'OK') {
-        console.error('Google Places API error:', data.status);
-        return [];
-    }
+    const modelAI = genAI.getGenerativeModel({model: 'gemini-pro'}); 
 
-    if (!data.results || !Array.isArray(data.results)) {
-        console.error('Invalid API response format - missing results array');
-        return [];
-    }
+    try { 
+        const prompt = `You are an advanced clothing iventory matching system.
+        I want you to check this store ${storeName} and check if this ${JSON.stringify(clothingAnalysis)} clothes is available in the store.
 
-    // Process and filter stores
-    const validStores = data.results
-        .filter(store => {
-        // Validate required fields exist
-        return store && 
-                store.place_id && 
-                store.name && 
-                store.vicinity && 
-                store.geometry && 
-                store.geometry.location;
-        })
-        .filter(store => 
-        KNOWN_CLOTHING_BRANDS.some(brand =>
-            store.name.toLowerCase().includes(brand.toLowerCase())
-        )
-        )
-        .map(store => {
-        // Calculate distance
-        const distanceMeters = haversine(
-            lat, lng,
-            store.geometry.location.lat,
-            store.geometry.location.lng
-        );
+        I need to know if that store has that particular clothing analysis.
         
-        return {
-            placeId: store.place_id,
-            name: store.name,
-            address: store.vicinity,
-            rating: store.rating || 0, // Default to 0 if no rating
-            distanceMeters: distanceMeters,
-            distance: (distanceMeters * 0.000621371).toFixed(1) + ' miles'
-        };
-        });
+        Return response in JSON format with these fields: 
+            "items": [{
+                "name": string (exact clothing name), 
+                "brand": string (brand name), 
+            }]
+        
+        Rules: 
+        1. Only include items that would realistically be in ${storeName}
+        2. Only return the specified JSON structure 
+        3. Do not include any explanations or additional fields
+        4. If no matches, return empty items array
+        `; 
 
-    console.log(`Found ${validStores.length} valid stores`);
-    return validStores;
+        const response = await modelAI.generateContent(request); 
+        const responseText = response.response.text(); 
 
-    } catch (err) {
-    console.error('Full error fetching stores:', err);
-    if (err.response) {
-        console.error('Google API response error:', err.response.data);
+        // Extract JSON from markdown if needed
+        const jsonStart = responseText.indexOf('{'); 
+        const jsonEnd = responseText.indexOf('}') + 1; 
+        const jsonString = responseText.slice(jsonStart, jsonEnd); 
+
+        const inventory = JSON.parse(jsonString); 
+
+        // Validate and return only the required fields
+        return { 
+            items: (inventory.items || []).map(item => ({
+                name: item.name || 'Unknown', 
+                brand: item.brand || 'Unkown'
+            }))
+        }; 
+
     }
-    return [];
+    catch (error) { 
+        console.error('AI inventory check failed: ', error); 
+        return {items: []}; 
     }
-     
 }
 
-module.exports = router;
+module.exports = router; 
