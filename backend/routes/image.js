@@ -84,8 +84,11 @@ async function estimateClothingSizeAI(imagePath) {
         }
       ]
     });
-    const response = JSON.parse(result.response.text().replace(/```json\```/g, '').trim()); 
 
+    const responseText = await result.response.text(); 
+    const cleanedResponse = responseText.replace(/```json/g, '').replace(/```/g, '').trim(); 
+    const response = JSON.parse(cleanedResponse); 
+    
     return { 
       size: response.size, 
       dimensions: response.dimensions

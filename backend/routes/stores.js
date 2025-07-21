@@ -108,11 +108,11 @@ router.post('/api/recommendations', upload.single('image'), async (req, res) => 
 async function simulateInventoryMatch(storeName, clothingAnalysis) { 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY); 
     
-    const modelAI = genAI.getGenerativeModel({model: 'gemini-pro'}); 
+    const modelAI = genAI.getGenerativeModel({model: 'gemini-1.5-pro'}); 
 
     try { 
         const prompt = `You are an advanced clothing iventory matching system.
-        I want you to check this store ${storeName} and check if this ${JSON.stringify(clothingAnalysis)} clothes is available in the store.
+        Check if ${storeName} carries items matching: ${JSON.stringify(clothingAnalysis)}. 
 
         I need to know if that store has that particular clothing analysis.
         
@@ -126,16 +126,21 @@ async function simulateInventoryMatch(storeName, clothingAnalysis) {
         1. Only include items that would realistically be in ${storeName}
         2. Only return the specified JSON structure 
         3. Do not include any explanations or additional fields
-        4. If no matches, return empty items array
+        4. Empty items array if no matches
         `; 
 
-        const response = await modelAI.generateContent(request); 
-        const responseText = response.response.text(); 
+        const result = await modelAI.generateContent({
+            contents: [{
+                parts: [{
+                    text: prompt
+                }]
+            }]
+        }); 
 
-        // Extract JSON from markdown if needed
-        const jsonStart = responseText.indexOf('{'); 
-        const jsonEnd = responseText.indexOf('}') + 1; 
-        const jsonString = responseText.slice(jsonStart, jsonEnd); 
+        const response = await result.response; 
+        const responseText = await response.text(); 
+
+        const jsonString = responseText.replace(/```json/g, '').replace(/```/g, '').trim(); 
 
         const inventory = JSON.parse(jsonString); 
 
@@ -143,7 +148,7 @@ async function simulateInventoryMatch(storeName, clothingAnalysis) {
         return { 
             items: (inventory.items || []).map(item => ({
                 name: item.name || 'Unknown', 
-                brand: item.brand || 'Unkown'
+                brand: item.brand || 'Unknown'
             }))
         }; 
 
