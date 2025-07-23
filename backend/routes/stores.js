@@ -8,7 +8,7 @@ const {analyzeClothingImage, findNearbyStoresAI} = require('../imageMatcher');
 const GOOGLE_KEY = process.env.GOOGLE_PLACE_KEY;
 const {GoogleGenerativeAI} = require('@google/generative-ai'); 
 
-const KNOWN_CLOTHING_BRANDS = ['H&M', 'Uniqlo', 'Zara', 'Bluenotes', 'Banana Republic', 'Forever 21', 'Guess', 'Lee Cooper', 'Adidas', 'Nike', 'Puma', 'Lululemon', 'Winners', 'Hollister', 'Abercrombie & Fitch', 'Gap', 'Old Navy', 'Express', 'Marshalls', 'Pull & Bear', 'Armani Exchange', 'Polo', 'Calvin Klein', 'Cotton On', 'Giordano', 'Essentials']; 
+const KNOWN_CLOTHING_BRANDS = ['H&M', 'Uniqlo', 'Zara', 'Bluenotes', 'Banana Republic', 'Forever 21', 'Guess', 'Lee Cooper', 'Adidas', 'Nike', 'Puma', 'Lululemon', 'Winners', 'Hollister', 'Abercrombie & Fitch', 'Gap', 'Old Navy', 'Express', 'Marshalls', 'Pull & Bear', 'Armani Exchange', 'Polo', 'Calvin&Klein', 'Cotton On', 'Giordano', 'Essentials', 'West49', 'Off-White', 'Supreme', 'Bershka', 'Shein', 'Roots', 'Mango', 'Frank and Oak', 'Aritzia', 'Lacoste', 'New Balance', 'Bathing Ape']; 
 
 
 if (!GOOGLE_KEY) {

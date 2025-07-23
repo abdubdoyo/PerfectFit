@@ -150,6 +150,12 @@ export default function LandingPage() {
   // show stores flag
   const [showStores, setShowStores] = useState(false);
 
+  // Abort finding stores 
+  const [cancelToken, setCancelToken] = useState<AbortController | null>(null); 
+
+  // Abort size finder 
+  const [sizeCancelToken, setSizeCancelToken] = useState<AbortController | null>(null); 
+
   // auth check
   useEffect(() => {
     (async () => {
@@ -229,6 +235,8 @@ export default function LandingPage() {
     if (!selectedImage || !selectedSize) return;
     try {
       setLoadingSize(true);
+      const controller = new AbortController(); 
+      setSizeCancelToken(controller); 
 
       const formData = new FormData();
       if (Platform.OS === "web") {
@@ -250,6 +258,7 @@ export default function LandingPage() {
       const res = await fetch("http://localhost:3000/api/estimate-shirt-size", {
         method: "POST",
         body: formData,
+        signal: controller.signal, 
       });
 
       const data = await res.json();
@@ -259,17 +268,32 @@ export default function LandingPage() {
       setSizeModal(false);
       setResultModal(true);
     } catch (e: any) {
-      Alert.alert(e.message || "Upload failed");
+      if (e.name !== 'AbortError') { 
+        Alert.alert(e.message || 'Upload Failed'); 
+      }
     } finally {
       setLoadingSize(false);
+      setSizeCancelToken(null); 
     }
   };
+
+  const handleCancelSizeEstimation = () => { 
+    if (sizeCancelToken) { 
+      sizeCancelToken.abort(); 
+    }
+    setLoadingSize(false); 
+    setSelectedSize(null); 
+    setSizeModal(false); 
+  }
 
   // fetch nearby stores
   const handleFindStores = async () => {
     if (!shirtResult || !selectedImage) return;
     try {
       setLoadingStores(true);
+      const controller = new AbortController(); 
+      setCancelToken(controller); 
+
       const { lat, lng } = await getCoords();
 
       const formData = new FormData(); 
@@ -296,6 +320,7 @@ export default function LandingPage() {
       const res = await fetch("http://localhost:3000/api/recommendations", {
         method: "POST",
         body: formData,
+        signal: controller.signal, // Added abort signal
       });
   
       const data = await res.json();
@@ -312,12 +337,23 @@ export default function LandingPage() {
       setResultModal(false);
     }
     catch (e: any) { 
-      Alert.alert('Error', e.message); 
+      if (e.name !== 'AbortError') { 
+        Alert.alert('Error', e.message); 
+      }
     }
     finally { 
       setLoadingStores(false); 
+      setCancelToken(null); 
     }
   };
+
+  const handleCancelFindStores = () => { 
+    if (cancelToken) { 
+      cancelToken.abort(); 
+    }
+    setLoadingStores(false); 
+    setResultModal(false); 
+  }; 
 
   // ──────────────────────────────────────────────────────────────
   // 6. RENDER  ──────────────────────────────────────────────────
@@ -392,15 +428,32 @@ export default function LandingPage() {
               onSelect={setSelectedSize}
             />
 
-            <View style={{ flexDirection: "row", marginTop: 16 }}>
-              <SecondaryButton label="Back" onPress={() => setSizeModal(false)} style={{ flex: 1, marginRight: 8 }} />
+            {loadingSize ? (
+              <View style={{ flexDirection: "row", marginTop: 16 }}>
+                <SecondaryButton 
+                  label="Cancel" 
+                  onPress={handleCancelSizeEstimation} 
+                  style={{ flex: 1, marginRight: 8 }} 
+                />
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                </View>
+              </View>
+            ) : (
+              <View style={{ flexDirection: "row", marginTop: 16 }}>
+              <SecondaryButton 
+                label="Back" 
+                onPress={() => setSizeModal(false)} 
+                style={{ flex: 1, marginRight: 8 }} 
+              />
               <PrimaryButton
-                label={loadingSize ? "Uploading…" : "Confirm"}
-                disabled={!selectedSize || loadingSize}
+                label="Confirm"
+                disabled={!selectedSize}
                 onPress={handleSizeConfirm}
                 style={{ flex: 1 }}
               />
             </View>
+            )}
           </View>
         </View>
       </Modal>
@@ -411,16 +464,28 @@ export default function LandingPage() {
           <View style={modal.resultCard}>
             <Text style={modal.title}>Your size results</Text>
             {shirtResult && <Text style={modal.resultText}>{shirtResult}</Text>}
-            <PrimaryButton
-              label={loadingStores ? "Finding stores…" : "Find nearby stores"}
-              onPress={handleFindStores}
-              style={{ marginBottom: 16 }}
-              disabled={loadingStores}
-            />
-
-            <SecondaryButton label="Close" onPress={() => {
-              setResultModal(false);
-            }} />
+            {loadingStores ? (
+              <View style={{ alignItems: 'center' }}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <PrimaryButton
+                  label="Cancel"
+                  onPress={handleCancelFindStores}
+                  style={{ marginTop: 16 }}
+                />
+              </View>
+            ) : (
+              <>
+                <PrimaryButton
+                  label="Find nearby stores"
+                  onPress={handleFindStores}
+                  style={{ marginBottom: 16 }}
+                />
+                <SecondaryButton 
+                  label="Close" 
+                  onPress={() => setResultModal(false)} 
+                />
+              </>
+            )}
           </View>
         </View>
       </Modal>

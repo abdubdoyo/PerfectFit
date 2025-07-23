@@ -28,7 +28,7 @@ const developers = [
   },
   {
     name: "Rohan Ramchandani",
-    image: require('../assets/images/Profile2.jpg'),
+    image: require('../assets/images/Profile2.jpeg'),
     about: "Second-year international student from Indonesia studying Computer Science at Toronto Metropolitan University.",
     skills: ['React Native', 'TypeScript', 'Python', 'Java', 'React', 'Node.js', 'Express.js', 'MongoDB'],
     links: [
