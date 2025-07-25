@@ -43,18 +43,19 @@ async function estimateClothingSizeAI(imagePath) {
 
     const model = genAI.getGenerativeModel({model: 'gemini-1.5-flash'}); 
 
-    const prompt = `Analyze this clothing item image and estimate its size based on: 
-      - Visual proportions compared to standard sizing charts
-      - Brand sizing standards if visible
+    const prompt = `Analyze this clothing item image and: 
+      1. If there's a visible size tag (like S, M, L, XL) return that
+      2. Otherwise estimate size based on proportions compared to standard sizing
+      3. For brand items, consider brand-specific sizing if visible
 
-      Respond only with JSON format: 
-      { 
-        "size": "estimated size (XS/S/M/L/XL)" , 
+      Respons only with JSON format: 
+      {
+        "size": "detected size (XS/S/M/L/XL/XXL or exact tag text)", 
+        "sizeSource": "tag/estimation", 
         "dimensions": { 
           "shoulderWidthCm": number, 
           "chestWidthCm": number, 
           "lengthCm": number, 
-          "torsoLength": number, 
           "confidence": 0-1
         }
       }
@@ -99,6 +100,24 @@ async function estimateClothingSizeAI(imagePath) {
     return null; 
   }
 }
+
+async function containsHuman(imagePath) { 
+  try { 
+    const image = await loadImage(imagePath); 
+    const canvas = createCanvas(512, 512); 
+    const ctx = canvas.getContext('2d'); 
+
+    ctx.drawImage(image, 0, 0, 512, 512); 
+    const input = tf.browser.fromPixels(canvas); 
+    const poses = await detector.estimatePoses(input); 
+    input.dispose(); 
+    return poses.length > 0; 
+  }
+  catch { 
+    return false; 
+  }
+}
+
 
 
 async function estimateShoulderWidth(imagePath) {
@@ -181,71 +200,60 @@ function mapToSize(widthCm) {
   return 'S';
 }
 
+
+
 router.post('/api/estimate-shirt-size', upload.single('photo'), async (req, res) => {
   try {
     const imagePath = path.join(__dirname, '../', req.file.path);
     const userSize = req.body.userSize; 
-    const [poseEstimation, aiEstimation] = await Promise.all([
-      estimateShoulderWidth(imagePath).then(({ shoulderWidthPx, torsoLengthPx }) => {
-        const widthCm = estimateCmFromTorsoRatio(shoulderWidthPx, torsoLengthPx);
-        return {
-          method: 'pose',
-          size: mapToSize(widthCm),
-          confidence: 0.8, // Default confidence for pose estimation
-          dimensions: {
-            shoulderWidthCm: widthCm.toFixed(2)
-          }
-        };
-      }),
-      estimateClothingSizeAI(imagePath)
-    ]); 
-       // Combine results
-        const combinedResult = {
-          poseEstimation,
-          aiEstimation,
-          finalSize: aiEstimation ? 
-            (aiEstimation.confidence > 0.7 ? aiEstimation.size : poseEstimation.size) : 
-            poseEstimation.size,
-          combinedDimensions: aiEstimation?.dimensions ? {
-            shoulderWidthCm: (
-              parseFloat(poseEstimation.dimensions.shoulderWidthCm) + 
-              aiEstimation.dimensions.shoulderWidthCm
-            ) / 2
-          } : poseEstimation.dimensions
-        };
-    
-        // Compare with user size if provided
-        if (userSize) {
-          combinedResult.userComparison = {
-            userSize,
-            matchesPose: userSize === poseEstimation.size,
-            matchesAI: aiEstimation ? userSize === aiEstimation.size : null,
-            agreement: poseEstimation.size === (aiEstimation?.size || poseEstimation.size)
-          };
-        }
-    
-        setTimeout(() => {
-          try{
-            fs.unlinkSync(imagePath);
-          }
-          catch(e){
-            console.warn("Failed to delete image file: ", e);
-          }
-        }, 500);
-       
-    
-        res.json({
-          ...combinedResult,
-          message: `Recommended size: ${combinedResult.finalSize}` +
-            (userSize ? ` (You selected: ${userSize})` : '')
-        });
+
+    // Try AI estimation first 
+    const aiEstimation = await estimateClothingSizeAI(imagePath); 
+
+    let poseEstimation = null; 
+    if (!aiEstimation && userSize && await containsHuman(imagePath)) { 
+      try { 
+        const poseData = await estimateShoulderWidth(imagePath); 
+        const widthCm = await estimateCmFromTorsoRatio(poseData.shoulderWidthPx, poseData.torsoLengthPx); 
+
+        poseEstimation = { 
+          method: 'pose', 
+          size: mapToSize(widthCm), 
+          confidence: 0.8, 
+          dimensions: {shoulderWidthCm: widthCm.toFixed(2)}
+        }; 
+
+
+      }
+      catch (poseError) { 
+        console.log('Pose estimation skipped for clothing item'); 
+      }
+    }
+
+    const result = { 
+      aiEstimation, 
+      poseEstimation, 
+      finalSize: aiEstimation?.size || (poseEstimation?.size || 'Unknown'), 
+      message: aiEstimation ? 
+      `Detected size: ${aiEstimation.size} (from ${aiEstimation.sizeSource})` : 
+      'Could not determine size from clothing item photo'
+    }; 
+
+    if (userSize) { 
+      result.userComparison = { 
+        userSize, 
+        matchesEstimation: userSize === result.finalSize
+      }; 
+    }
+
+    setTimeout(() => fs.unlinkSync(imagePath), 500); 
+    res.json(result); 
+
   } catch (error) {
     console.error(error);
-    const message = error.message || 'Pose estimation failed';
-    if (message.includes('clearly visible') || message.includes('close') || message.includes('tilt') || message.includes('arms') || message.includes('sideways')) {
-      return res.status(400).json({ error: message });
-    }
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({
+      error: error.message, 
+    })
   }
 });
 
