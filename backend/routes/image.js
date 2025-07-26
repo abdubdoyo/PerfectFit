@@ -37,30 +37,34 @@ function calculateDistance(p1, p2) {
 }
 
 // AI Clothing Size Estimation
-async function estimateClothingSizeAI(imagePath) { 
+async function estimateClothingSizeAI(imagePath, userInputSize) { 
   try { 
-    const processedImage = await sharp(imagePath).resize(800, 800, {fit: 'inside', withoutEnlargement: true}).jpeg({quality: 80}).toBuffer(); 
+    const processedImage = await sharp(imagePath).normalize().sharpen().resize(1024, 1024, {fit: 'inside', withoutEnlargement: true}).toBuffer(); 
 
     const model = genAI.getGenerativeModel({model: 'gemini-1.5-flash'}); 
 
-    const prompt = `Analyze this clothing item image and: 
-      1. If there's a visible size tag (like S, M, L, XL) return that
-      2. Otherwise estimate size based on proportions compared to standard sizing
-      3. For brand items, consider brand-specific sizing if visible
+    const prompt = `Analyze this clothing item image with extreme precision:
+      USER PROVIDED SIZE: ${userInputSize || 'Not provided'} (use only as secondary reference)
+      1. First check for any visible size tags (S, M, L, XL, number, or brand-specific sizing)
+      2. If there's no tag, compare the item to common reference objects in the image (hangers, hands, etc.)
+      3. For folded items, estimate based on fold patters and proportions
+      4. Consider brand-specific sizing norms if brand is identifiable
+      5. When uncertain, bias toward smaller sizes
 
-      Respons only with JSON format: 
-      {
-        "size": "detected size (XS/S/M/L/XL/XXL or exact tag text)", 
-        "sizeSource": "tag/estimation", 
+      return JSON with: 
+      { 
+        "size": "exact tag text or estimated size (XXS-XS-S-M-L-XL-XXL), 
+        "sizeSource": "tag/estimation/brand", 
         "dimensions": { 
           "shoulderWidthCm": number, 
           "chestWidthCm": number, 
           "lengthCm": number, 
           "confidence": 0-1
-        }
+        }, 
+        "reasoning": "brief explanation of determination"
+        "matchesUserInput": boolean
       }
     `; 
-
 
     const imageParts = [{
       inlineData: { 
@@ -200,6 +204,42 @@ function mapToSize(widthCm) {
   return 'S';
 }
 
+function combineEstimations(aiEstimation, poseEstimation) { 
+  const sizeMap = { XXS: 0, XS: 1, S: 2, M: 3, L: 4, XL: 5}; 
+  const reverseSizeMap = ['XXS', 'XS', 'S', 'M', 'L', 'XL']; 
+
+  const aiSizeValue = sizeMap[aiEstimation.size] || 3; 
+  const poseSizeValue = sizeMap[poseEstimation.size] || 3; 
+
+  const combinedValue = Math.round((aiSizeValue * 0.6) + (poseSizeValue * 0.4)); 
+  const combinedSize = reverseSizeMap[Math.min(Math.max(combinedValue, 0), 5)]; 
+
+  return { 
+    size: combinedSize, 
+    method: 'combined', 
+    confidence: (aiEstimation.dimensions.confidence * 0.6 + poseEstimation.confidence * 0.4), 
+    components: { 
+      ai: aiEstimation,
+      pose: poseEstimation
+    }
+  }; 
+}
+
+function getResultMessage(aiEstimation, poseEstimation, combinedEstimation) { 
+  if (combinedEstimation) { 
+    return `Combined estimation: ${combinedEstimation.size}`; 
+  }
+
+  if (aiEstimation) { 
+    return `Detected size of ${aiEstimation.size}`; 
+  }
+
+  if (poseEstimation) { 
+    return `Estimated size from body measurements: ${poseEstimation.size}`; 
+  }
+
+  return 'Could not determine size from the photo'; 
+}
 
 
 router.post('/api/estimate-shirt-size', upload.single('photo'), async (req, res) => {
@@ -207,11 +247,16 @@ router.post('/api/estimate-shirt-size', upload.single('photo'), async (req, res)
     const imagePath = path.join(__dirname, '../', req.file.path);
     const userSize = req.body.userSize; 
 
-    // Try AI estimation first 
-    const aiEstimation = await estimateClothingSizeAI(imagePath); 
+    const [aiEstimation, hasHuman] = await Promise.all([
+      estimateClothingSizeAI(imagePath, userSize), 
+      containsHuman(imagePath)
+    ]); 
 
     let poseEstimation = null; 
-    if (!aiEstimation && userSize && await containsHuman(imagePath)) { 
+    let combinedEstimation = null; 
+
+    // If there's a human in the image, always try pose detection 
+    if (hasHuman) { 
       try { 
         const poseData = await estimateShoulderWidth(imagePath); 
         const widthCm = await estimateCmFromTorsoRatio(poseData.shoulderWidthPx, poseData.torsoLengthPx); 
@@ -223,32 +268,35 @@ router.post('/api/estimate-shirt-size', upload.single('photo'), async (req, res)
           dimensions: {shoulderWidthCm: widthCm.toFixed(2)}
         }; 
 
-
+        // If we have both AI and pose detection, combine them 
+        if (aiEstimation) { 
+          combinedEstimation = combineEstimation(aiEstimation, poseEstimation); 
+        }
       }
       catch (poseError) { 
-        console.log('Pose estimation skipped for clothing item'); 
+        console.log('Pose estimation failed:', poseError.message); 
       }
     }
+
+    const finalSize = combinedEstimation?.size || aiEstimation?.size || (poseEstimation?.size || 'Unknown'); 
 
     const result = { 
       aiEstimation, 
       poseEstimation, 
-      finalSize: aiEstimation?.size || (poseEstimation?.size || 'Unknown'), 
-      message: aiEstimation ? 
-      `Detected size: ${aiEstimation.size} (from ${aiEstimation.sizeSource})` : 
-      'Could not determine size from clothing item photo'
+      combinedEstimation, 
+      finalSize, 
+      message: getResultMessage(aiEstimation, poseEstimation, combinedEstimation)
     }; 
 
     if (userSize) { 
       result.userComparison = { 
         userSize, 
-        matchesEstimation: userSize === result.finalSize
+        matchesEstimation: userSize === finalSize
       }; 
     }
 
     setTimeout(() => fs.unlinkSync(imagePath), 500); 
     res.json(result); 
-
   } catch (error) {
     console.error(error);
     res.status(500).json({

@@ -289,21 +289,22 @@ export default function LandingPage() {
   // fetch nearby stores
   const handleFindStores = async () => {
     if (!shirtResult || !selectedImage) return;
+    
     try {
       setLoadingStores(true);
       const controller = new AbortController(); 
       setCancelToken(controller); 
-
+  
+      // 1. Get coordinates
       const { lat, lng } = await getCoords();
-
+  
+      // 2. Prepare form data with image
       const formData = new FormData(); 
-
       if (Platform.OS === 'web') { 
         const resp = await fetch(selectedImage); 
         const blob = await resp.blob(); 
         formData.append("image", blob, "outfit.jpg"); 
-      }
-      else { 
+      } else { 
         const fileName = selectedImage.split("/").pop() || "outfit.jpg"; 
         const type = fileName.endsWith(".png") ? "image/png" : "image/jpeg"; 
         formData.append("image", { 
@@ -312,40 +313,71 @@ export default function LandingPage() {
           type, 
         } as any); 
       }
-      const sizeLetter = shirtResult.match(/size: (\w+)/i)?.[1] || ''; 
+  
+      // 3. IMPROVED SIZE EXTRACTION
+      let sizeLetter = '';
+      
+      // Option 1: If shirtResult is an object with size property
+      if (typeof shirtResult === 'object' && shirtResult.size) {
+        sizeLetter = shirtResult.size;
+      } 
+      // Option 2: If it's a string with JSON
+      else if (typeof shirtResult === 'string' && shirtResult.includes('{')) {
+        try {
+          const parsed = JSON.parse(shirtResult);
+          sizeLetter = parsed.size || parsed.finalSize || '';
+        } catch (e) {
+          console.warn('Could not parse shirtResult as JSON');
+        }
+      }
+      // Option 3: Fallback to regex
+      if (!sizeLetter) {
+        const sizeMatch = shirtResult.toString().match(/(?:size|finalSize)[: ]*(\w+)/i);
+        sizeLetter = sizeMatch?.[1] || '';
+      }
+  
+      if (!sizeLetter) {
+        throw new Error('Could not determine clothing size');
+      }
+  
+      // 4. Add all data to form
       formData.append("size", sizeLetter); 
       formData.append("lat", lat.toString());
       formData.append("lng", lng.toString());
   
+      // 5. Make the API call
       const res = await fetch("http://localhost:3000/api/recommendations", {
         method: "POST",
         body: formData,
-        signal: controller.signal, // Added abort signal
+        signal: controller.signal,
       });
   
+      // 6. Handle response
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Store fetch failed");
       
       const enhancedStores = data.recommendations.map((store: any) => ({
         ...store.store, 
-        displayDistance: store.store.distanceMeters > 10000 ? `${(store.distanceMeters * 0.001).toFixed(1)} km` : `${(store.distanceMeters)} m`, 
-        matchQuality: store.matchConfidence > 0.8 ? 'High' : store.matchConfidence > 0.5 ? 'Medium' : 'Low'
+        displayDistance: store.store.distanceMeters > 1000 
+          ? `${(store.store.distanceMeters * 0.001).toFixed(1)} km` 
+          : `${store.store.distanceMeters} m`, 
+        matchQuality: store.matchConfidence > 0.8 ? 'High' : 
+                    store.matchConfidence > 0.5 ? 'Medium' : 'Low'
       })); 
-
-      setStoreResults(enhancedStores); // Now includes match details
+  
+      setStoreResults(enhancedStores);
       setShowStores(true);
       setResultModal(false);
-    }
-    catch (e: any) { 
+    } catch (e: any) { 
       if (e.name !== 'AbortError') { 
         Alert.alert('Error', e.message); 
       }
-    }
-    finally { 
+    } finally { 
       setLoadingStores(false); 
       setCancelToken(null); 
     }
   };
+  
 
   const handleCancelFindStores = () => { 
     if (cancelToken) { 
