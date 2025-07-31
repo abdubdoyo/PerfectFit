@@ -804,4 +804,4 @@ const storesSection = StyleSheet.create({
   storesList: {
     maxHeight: 400,
   },
-}) 
+})
