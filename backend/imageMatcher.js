@@ -1,17 +1,15 @@
-const {GoogleGenerativeAI} = require('@google/generative-ai'); 
+const {GoogleGenAI } = require('@google/genai'); 
 require('dotenv').config(); 
 const axios = require('axios'); 
 
 // Initialize the AI 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY); 
-
-const modelAI = genAI.getGenerativeModel({model: 'gemini-1.5-flash'}); 
+const genAI = new GoogleGenAI({apiKey: process.env.GEMINI_API_KEY}); 
 
 async function analyzeClothingImage(imageBuffer) { 
     try { 
         const prompt = `Analyzs ONLY THE TOP/UPPER BODY clothing based on the image I am providing you. Ignore all lower body attire. Provide details in this exact JSON format: 
             { 
-                "color": string, (primary color)
+                "color": string (primary color),
                 "brand": string (if recognizable), 
                 "style": string (casual/formal/sporty), 
                 "pattern": string (solid, striped, printed), 
@@ -23,21 +21,21 @@ async function analyzeClothingImage(imageBuffer) {
             Return ONLY this JSON object with no other text, explanation.  
         `; 
 
-        const request = { 
-            contents: [{
-                parts: [
-                    {text: prompt}, 
-                    {inlineData: {
-                        mimeType: 'image/jpeg', 
-                        data: imageBuffer.toString('base64')
-                    }}
-                ]
-            }]
-        }; 
+        const contents = [{
+            parts: [
+                {text: prompt}, 
+                {inlineData: {
+                    mimeType: 'image/jpeg', 
+                    data: imageBuffer.toString('base64')
+                }}
+            ]
+        }]; 
 
-        const result = await modelAI.generateContent(request); 
-        const response = await result.response; 
-        const responseText = await response.text(); 
+        const result = await genAI.models.generateContent({
+            model: 'gemini-2.5-pro',
+            contents: contents
+        }); 
+        const responseText = result.text; 
 
         if (!responseText) { 
             throw new Error('Empty response from AI model'); 

@@ -1,13 +1,10 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { GoogleGenAI  } = require('@google/genai');
 require('dotenv').config();
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY); 
+const genAI = new GoogleGenAI ({apiKey: process.env.GEMINI_API_KEY}); 
 
 // Only based on the brandStores that are being given in findStoresWithAI
 async function generateStoreUrl(stores, clothingDetails, country) { 
-    const model = genAI.getGenerativeModel({
-        model: 'gemini-1.5-pro'
-    }); 
 
     const prompt = `Generate an e-commerce search URLs for these stores in ${country} matching: ${clothingDetails.color} ${clothingDetails.type}. 
     
@@ -26,33 +23,28 @@ async function generateStoreUrl(stores, clothingDetails, country) {
     }`;
 
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        const responseText = response.text();
+        const result = await genAI.models.generateContent({
+            model: 'gemini-2.5-pro',
+            contents: prompt
+        });
+        const responseText = result.text;
         
         console.log("Raw AI Response:", responseText);  // Debug logging
 
         // Extract JSON from response
-        const jsonStart = responseText.indexOf('{');
-        const jsonEnd = responseText.lastIndexOf('}') + 1;
-        const jsonString = responseText.slice(jsonStart, jsonEnd);
+        const jsonMatch = responseText.match(/\{[\s\S]*?\}/);
+        if (!jsonMatch) {
+            throw new Error('No valid JSON object found in AI response');
+        }
+        const jsonString = jsonMatch[0];
 
-        // Clean the JSON string
+        // Clean the JSON string (minimal cleaning since AI is generating better JSON now)
         let cleanJson = jsonString
-            .replace(/'/g, '"')  // Replace single quotes
-            .replace(/(\w+)(\s*:\s*)/g, '"$1":')  // Ensure proper quotes around keys
+            .replace(/'/g, '"')  // Replace single quotes if any
             .replace(/,\s*}/g, '}')  // Remove trailing commas
             .replace(/,\s*]/g, ']'); // Remove trailing commas in arrays
 
-        console.log("Cleaned JSON:", cleanJson);  // Debug logging
-
-        cleanJson = cleanJson
-            .replace(/""https"":/g, '"https:')  // Fix the malformed URLs
-            .replace(/""http"":/g, '"http:')    // Fix http URLs if they exist
-            .replace(/"Unsure"/g, 'null');      // Handle "Unsure" values
-
         console.log("Final Cleaned JSON:", cleanJson);  // Verify the fix
-
         const urls = JSON.parse(cleanJson);
 
         return stores.map(store => ({

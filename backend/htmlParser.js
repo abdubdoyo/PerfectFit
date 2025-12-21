@@ -19,7 +19,7 @@ function parseStoreHtml(storeName, html) {
     
     return {
         store: storeName,
-        items: items.filter(item => item.name && item.price).map(item => ({
+        items: items.filter(item => item.name && item.price && item.url).map(item => ({
             ...item,
             url: item.url.startsWith('http') ? item.url : 
                 `https://${normalizedName.replace(/\s+/g, '')}.com${item.url}`

@@ -4,18 +4,42 @@ const router = express.Router();
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
-const {GoogleGenerativeAI} = require('@google/generative-ai'); 
+const {GoogleGenAI } = require('@google/genai'); 
 const sharp = require('sharp'); 
 require('dotenv').config(); 
 
 // Initializing AI Model 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY); 
+const genAI = new GoogleGenAI ({apiKey: process.env.GEMINI_API_KEY});  
 
 // TensorFlow.js & Pose Detection
 const tf = require('@tensorflow/tfjs');
 const poseDetection = require('@tensorflow-models/pose-detection');
 const { createCanvas, loadImage } = require('canvas');
 
+// Load MoveNet THUNDER model
+let detector;
+async function loadModel() {
+  try {
+    // 1. Explicitly set CPU backend
+    await tf.setBackend('cpu');
+    
+    // 2. Wait for TensorFlow to be fully ready
+    await tf.ready();
+    
+    console.log(`TensorFlow.js backend: ${tf.getBackend()}`);
+    
+    // 3. Now load the pose detection model
+    detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
+      modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER, // IMPORTANT: Use SINGLEPOSE_THUNDER
+    });
+    
+    console.log('MoveNet model loaded successfully on CPU backend');
+  } catch (error) {
+    console.error('Failed to load TensorFlow model:', error);
+    // You might want to disable pose detection features if model fails to load
+  }
+}
+loadModel();
 // Multer Storage Config
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, 'uploads/'),
@@ -23,14 +47,6 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// Load MoveNet THUNDER model
-let detector;
-async function loadModel() {
-  detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
-    modelType: poseDetection.movenet.modelType.THUNDER,
-  });
-}
-loadModel();
 
 function calculateDistance(p1, p2) {
   return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
@@ -39,9 +55,8 @@ function calculateDistance(p1, p2) {
 // AI Clothing Size Estimation
 async function estimateClothingSizeAI(imagePath, userInputSize) { 
   try { 
-    const processedImage = await sharp(imagePath).normalize().sharpen().resize(1024, 1024, {fit: 'inside', withoutEnlargement: true}).toBuffer(); 
-
-    const model = genAI.getGenerativeModel({model: 'gemini-1.5-flash'}); 
+    const imageBuffer = fs.readFileSync(imagePath);
+    const processedImage = await sharp(imageBuffer).normalize().sharpen().resize(1024, 1024, {fit: 'inside', withoutEnlargement: true}).toBuffer(); 
 
     const prompt = `Analyze this clothing item image with extreme precision:
       USER PROVIDED SIZE: ${userInputSize || 'Not provided'} (use only as secondary reference)
@@ -66,14 +81,8 @@ async function estimateClothingSizeAI(imagePath, userInputSize) {
       }
     `; 
 
-    const imageParts = [{
-      inlineData: { 
-        data: processedImage.toString('base64'), 
-        mimeType: 'image/jpeg'
-      }
-    }]; 
-
-    const result = await model.generateContent({
+    const result = await genAI.models.generateContent({
+      model: 'gemini-2.5-pro',
       contents: [
         {
           role: "user",
@@ -90,7 +99,7 @@ async function estimateClothingSizeAI(imagePath, userInputSize) {
       ]
     });
 
-    const responseText = await result.response.text(); 
+    const responseText = result.text; 
     const cleanedResponse = responseText.replace(/```json/g, '').replace(/```/g, '').trim(); 
     const response = JSON.parse(cleanedResponse); 
     
@@ -270,7 +279,7 @@ router.post('/api/estimate-shirt-size', upload.single('photo'), async (req, res)
 
         // If we have both AI and pose detection, combine them 
         if (aiEstimation) { 
-          combinedEstimation = combineEstimation(aiEstimation, poseEstimation); 
+          combinedEstimation = combineEstimations(aiEstimation, poseEstimation); 
         }
       }
       catch (poseError) { 
@@ -295,7 +304,13 @@ router.post('/api/estimate-shirt-size', upload.single('photo'), async (req, res)
       }; 
     }
 
-    setTimeout(() => fs.unlinkSync(imagePath), 500); 
+    setTimeout(() => {
+      try {
+        fs.unlinkSync(imagePath);
+      } catch (err) {
+        console.warn('Failed to delete temp file:', err.message);
+      }
+    }, 5000); 
     res.json(result); 
   } catch (error) {
     console.error(error);

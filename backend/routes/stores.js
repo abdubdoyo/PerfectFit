@@ -6,9 +6,10 @@ const multer = require('multer');
 const upload = multer(); 
 const {analyzeClothingImage, findNearbyStoresAI} = require('../imageMatcher'); 
 const GOOGLE_KEY = process.env.GOOGLE_PLACE_KEY;
-const {GoogleGenerativeAI} = require('@google/generative-ai'); 
+const {GoogleGenAI } = require('@google/genai'); 
 const { generateStoreUrl } = require('../storeUrls');
 const { getCountryFromCoordinates } = require('../geocode');
+const { parseStoreHtml } = require('../htmlParser');
 
 const KNOWN_CLOTHING_BRANDS = ['H&M', 'Uniqlo', 'Zara', 'Bluenotes', 'Banana Republic', 'Forever 21', 'Guess', 'Lee Cooper', 'Adidas', 'Nike', 'Puma', 'Lululemon', 'Winners', 'Hollister', 'Abercrombie & Fitch', 'Gap', 'Old Navy', 'Express', 'Marshalls', 'Pull & Bear', 'Armani Exchange', 'Polo', 'Calvin&Klein', 'Cotton On', 'Giordano', 'Essentials', 'West49', 'Off-White', 'Supreme', 'Bershka', 'Shein', 'Roots', 'Mango', 'Frank and Oak', 'Aritzia', 'Lacoste', 'New Balance', 'Bathing Ape', 'Alo', 'Gymshark', 'Champion', ]; 
 
@@ -26,25 +27,6 @@ if (!process.env.GOOGLE_PLACE_KEY || process.env.GOOGLE_PLACE_KEY.includes('YOUR
 console.log("Google Places API key is configured correctly.");
 console.log("Using Google API Key:", GOOGLE_KEY ? "***REDACTED***" : "MISSING");
   
-// Distance calculation function 
-function haversine(lat1, lon1, lat2, lon2){
-    const R = 6371000;
-    const toRad = (x) => (x * Math.PI) / 180;
-  
-    const dLat = toRad(lat2 - lat1);
-    const dLon = toRad(lon2 - lon1);
-  
-    const a = 
-        Math.sin(dLat / 2) ** 2 +
-        Math.cos(toRad(lat1)) *
-        Math.cos(toRad(lat2)) *
-        Math.sin(dLon / 2) ** 2;
-  
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  
-        return R * c;
-}
-
 router.post('/api/recommendations', upload.single('image'), async (req, res) => {
     console.log('Received request with body:', req.body);
         
@@ -65,8 +47,22 @@ router.post('/api/recommendations', upload.single('image'), async (req, res) => 
         console.log(`Searching nearby stores based on your location: ${lat, lng}`); 
 
         // Step 1: Allow AI to analyze the image that we uploaded
-        const clothingAnalysis = await analyzeClothingImage(image.buffer); 
-        console.log('Clothing analysis results: ', clothingAnalysis); 
+        let clothingAnalysis = null;
+        try {
+            clothingAnalysis = await analyzeClothingImage(image.buffer); 
+            console.log('Clothing analysis results: ', clothingAnalysis); 
+        } catch (error) {
+            console.error('Image analysis failed:', error.message);
+            clothingAnalysis = { 
+                type: 'shirt', 
+                color: 'unknown', 
+                style: 'casual',
+                brand: 'unknown',
+                pattern: 'solid',
+                sleeveLength: 'short',
+                neckline: 'round'
+            }; // fallback with all required properties
+        } 
 
         // Step 2: Detect country 
         const country = await getCountryFromCoordinates(lat, lng);
@@ -79,9 +75,12 @@ router.post('/api/recommendations', upload.single('image'), async (req, res) => 
             console.log('No stores found'); 
             return res.status(404).json({error: 'No clothing stores found nearby'}); 
         }
+
+        // Cap to 10 stores to limit processing
+        const cappedStores = stores.slice(0, 10);
         
         // Step 4: Generate all store URLs in one batch 
-        const storesWithUrls = await generateStoreUrl(stores, clothingAnalysis, country); 
+        const storesWithUrls = await generateStoreUrl(cappedStores, clothingAnalysis, country); 
 
         // Step 5: Check inventory only for stores with valid URLs 
         const recommendations = await Promise.all(
@@ -116,24 +115,31 @@ router.post('/api/recommendations', upload.single('image'), async (req, res) => 
 
 }); 
 
-
-async function simulateInventoryMatch(url) { 
+async function simulateInventoryMatch(storeName, url) { 
     const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY; 
 
     if (!SCRAPER_API_KEY) { 
         throw new Error('Scrapper API key missing'); 
     }
 
-    const response = await axios.get('https://api.scraperapi.com', { 
-        params: { 
-            api_key: SCRAPER_API_KEY, 
-            url, 
-            render: true, 
-            timeout: 30000, 
-        }
-    }); 
+    try {
+        const response = await axios.get('https://api.scraperapi.com', { 
+            params: { 
+                api_key: SCRAPER_API_KEY, 
+                url, 
+                render: true, 
+                timeout: 30000, 
+            }
+        }); 
 
-    return parseStoreHtml(storeName, response.data); 
+        return parseStoreHtml(storeName, response.data); 
+    } catch (error) {
+        if (error.response && error.response.status === 404) {
+            // URL not found, return empty results
+            return { store: storeName, items: [] };
+        }
+        throw error; // Re-throw other errors
+    }
 }
 
 
