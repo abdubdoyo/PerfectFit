@@ -264,7 +264,7 @@ export default function LandingPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Unable to estimate size. Try retaking the photo.");
 
-      setShirtResult(data.message);
+      setShirtResult(data.finalSize);
       setSizeModal(false);
       setResultModal(true);
     } catch (e: any) {
@@ -314,27 +314,8 @@ export default function LandingPage() {
         } as any); 
       }
   
-      // 3. IMPROVED SIZE EXTRACTION
-      let sizeLetter = '';
-      
-      // Option 1: If shirtResult is an object with size property
-      if (typeof shirtResult === 'object' && shirtResult.size) {
-        sizeLetter = shirtResult.size;
-      } 
-      // Option 2: If it's a string with JSON
-      else if (typeof shirtResult === 'string' && shirtResult.includes('{')) {
-        try {
-          const parsed = JSON.parse(shirtResult);
-          sizeLetter = parsed.size || parsed.finalSize || '';
-        } catch (e) {
-          console.warn('Could not parse shirtResult as JSON');
-        }
-      }
-      // Option 3: Fallback to regex
-      if (!sizeLetter) {
-        const sizeMatch = shirtResult.toString().match(/(?:size|finalSize)[: ]*(\w+)/i);
-        sizeLetter = sizeMatch?.[1] || '';
-      }
+      // 3. Get size
+      let sizeLetter = shirtResult;
   
       if (!sizeLetter) {
         throw new Error('Could not determine clothing size');
@@ -354,16 +335,19 @@ export default function LandingPage() {
   
       // 6. Handle response
       const data = await res.json();
+      console.log('API response:', data);
       if (!res.ok) throw new Error(data.error || "Store fetch failed");
       
-      const enhancedStores = data.recommendations.map((store: any) => ({
-        ...store.store, 
-        displayDistance: store.store.distanceMeters > 1000 
-          ? `${(store.store.distanceMeters * 0.001).toFixed(1)} km` 
-          : `${store.store.distanceMeters} m`, 
-        matchQuality: store.matchConfidence > 0.8 ? 'High' : 
-                    store.matchConfidence > 0.5 ? 'Medium' : 'Low'
+      const enhancedStores = data.recommendations.map((rec: any) => ({
+        ...rec.store, 
+        displayDistance: rec.store.distance > 1000 
+          ? `${(rec.store.distance * 0.001).toFixed(1)} km` 
+          : `${Math.round(rec.store.distance)} m`, 
+        matchQuality: rec.matches && rec.matches.length > 0 ? 'High' : 'Low',
+        matches: rec.matches || []
       })); 
+      
+      console.log('Enhanced stores:', enhancedStores); 
   
       setStoreResults(enhancedStores);
       setShowStores(true);
@@ -407,7 +391,7 @@ export default function LandingPage() {
         <View style={storesSection.container}>
           <Text style={storesSection.title}>Recommended Stores</Text>
           {shirtResult && (
-            <Text style={storesSection.subtitle}>{shirtResult}</Text>
+            <Text style={storesSection.subtitle}>Your size is {shirtResult}</Text>
           )}
           <ScrollView style={storesSection.storesList}>
             {storeResults.map((store, i) => (
@@ -495,7 +479,7 @@ export default function LandingPage() {
         <View style={modal.overlay}>
           <View style={modal.resultCard}>
             <Text style={modal.title}>Your size results</Text>
-            {shirtResult && <Text style={modal.resultText}>{shirtResult}</Text>}
+            {shirtResult && <Text style={modal.resultText}>Your size is {shirtResult}</Text>}
             {loadingStores ? (
               <View style={{ alignItems: 'center' }}>
                 <ActivityIndicator size="large" color={colors.primary} />
@@ -590,9 +574,9 @@ function StoreCard({ store }: { store: any }) {
         <Text style={storeStyles.matchReason}>{store.displayDistance}</Text>
       )}
 
-      {store.url && (
-        <Text style={storeStyles.url} onPress={() => Linking.openURL(store.url)}>
-          View Online
+      {store.searchUrl && (
+        <Text style={storeStyles.url} onPress={() => Linking.openURL(store.searchUrl)}>
+          Search Online
         </Text>
       )}
 
