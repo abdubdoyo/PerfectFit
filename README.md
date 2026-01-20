@@ -1,4 +1,4 @@
-# Attire size predictor
+# PerfectFit — AI-Powered Clothing Size Estimation & Store Discovery
 A React Native mobile app that helps users find nearby clothing stores carrying items that match their size.
 Users can take a photo of clothing, get AI-powered size analysis, and discover local stores with inventory links.
 
@@ -38,7 +38,7 @@ PerfectFit follows a client–server architecture:
 
 # Features
 📸 Photo capture and upload
-🤖 AI clothing size estimation
+🤖 AI + pose-based clothing size estimation (ensemble approach)
 🗺️ Nearby store discovery via Google Places API
 🔍 Real-time inventory checking with web scraping
 📱 Expo-powered cross-platform mobile experience
